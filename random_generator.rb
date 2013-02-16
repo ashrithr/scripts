@@ -4,30 +4,31 @@
 # ---
 require 'rubygems'
 require 'fileutils'
-
-# => PHASE 1
-# Generate data to a file
-# cid<=>gender<=>age<=>country<=>num_of_friends
-# cid -> can be from 1000 onwards.
-# gender -> should be taken from array @gender randomly
-# country -> should be taken from array @countries randomly
-
-#Potential Gem Matches
-#https://github.com/stympy/faker -> generates fake data
-#https://github.com/muffinista/namey -> generates names using US census db
-#https://github.com/alexgutteridge/rsruby -> Ruby's full access to full R
-#                                            statistical programming env.
-#https://github.com/xuanxu/croupier -> generates random samples of numbers
-#                                      with specific probability distributions.
+require 'benchmark'
+require 'tempfile'
+begin
+  require 'parallel'
+  @has_parallel = true
+rescue LoadError
+  @has_parallel = false
+end
 
 #Globals
-@lines = 100                              #No. of lines to generate
+@lines = 200000                             #No. of lines to generate
 @output_file = "/tmp/analytics.data"      #Output file
+@cd = ","                                 #column delimeter
+@ld = "\n"                                #line delimeter
+@extras = true                            #generate extra data : name, phoneno,
+                                            # email, address
+@num_of_processes = @lines > 100000 ? @lines / 100000 : 1
+                                          #num_of_processes required to compute
 @cid_start = 1000                         #Customer id start int
 @gender = ["male", "female"]              #Gender array
+@lifetime_days = 90                       #Life time in days
+@friendcount_maxrange = 100               #Friends count maximum range
 @gender_with_probability = {              #Gender hash with probability
-  :male => 70,
-  :female => 30
+  :male   => 30,
+  :female => 70
 }
 @age_with_probability = {                 #Age hash with probability
   18 => 15,
@@ -53,6 +54,35 @@ require 'fileutils'
   "FRANCE",
   "EGYPT"
 ]
+@countries_with_probability = {           #Countries hash with probabilities
+  "USA"      => 60,
+  "UK"       => 25,
+  "CANADA"   => 5,
+  "MEXICO"   => 5,
+  "GERMANY"  => 10,
+  "FRANCE"   => 10,
+  "EGYPT"    => 5
+}
+@games = ["citygame", "sniper", "pictionary", "scramble"]
+@games_female = {
+  :citygame   => 50,
+  :pictionary => 30,
+  :scramble   => 15,
+  :sniper     => 5,
+}
+@games_male = {
+  :sniper     => 70,
+  :scramble   => 20,
+  :pictionary => 10,
+  :citygame   => 10,
+}
+
+# => Signal Handling
+Signal.trap :SIGINT do
+  STDERR.puts "Ctrl+C caught killing running processes and cleaning up"
+  @pids.each { |pid| Process.kill('INT', pid) } unless @pids.empty?
+  @tmp_files.each { |file| FileUtils.rm_rf file } unless @tmp_files.empty?
+end
 
 # => Definations
 def choose_weighted(weighted)
@@ -74,121 +104,263 @@ def choose_weighted(weighted)
   end
 end
 
+def gen_phone_num
+  # => Returns a random phone number
+  "#{rand(900) + 100}-#{rand(900) + 100}-#{rand(1000) + 1000}"
+end
+
+def gen_int_phone_num
+  # => Returns a random international phone number
+  "011-#{rand(100) + 1}-#{rand(100) + 10}-#{rand(1000) + 1000}"
+end
+
+def gen_email(name)
+  # => Returns a random email based on the usersname
+  firstname = name.split.first
+  lastname = name.split.last
+  domains = %w(yahoo.com gmail.com privacy.net webmail.com msn.com
+               hotmail.com example.com privacy.net)
+  return "#{(firstname + lastname).downcase}"\
+         "#{rand(100)}\@#{domains[rand(domains.size)]}"
+end
+
+class ParallelStuff
+  def self.processor_count
+    @processor_count ||= case RbConfig::CONFIG['host_os']
+    when /darwin9/
+      `hwprefs cpu_count`.to_i
+    when /darwin/
+      (hwprefs_available? ? `hwprefs thread_count` : `sysctl -n hw.ncpu`).to_i
+    when /linux|cygwin/
+      `grep -c processor /proc/cpuinfo`.to_i
+    when /(open|free)bsd/
+      `sysctl -n hw.ncpu`.to_i
+    when /mswin|mingw/
+      require 'win32ole'
+      wmi = WIN32OLE.connect("winmgmts://")
+    cpu = wmi.ExecQuery("select NumberOfLogicalProcessors from Win32_Processor")
+      cpu.to_enum.first.NumberOfLogicalProcessors
+    when /solaris2/
+      `psrinfo -p`.to_i # this is physical cpus afaik
+    else
+      $stderr.puts "Unknown architecture ( #{RbConfig::CONFIG["host_os"]} )."
+      1
+    end
+  end
+
+  def hwprefs_available?
+    `which hwprefs` != ''
+  end
+
+  def self.physical_processor_count
+    @physical_processor_count ||= case RbConfig::CONFIG['host_os']
+    when /darwin1/, /freebsd/
+      `sysctl -n hw.physicalcpu`.to_i
+    when /linux/
+      `grep cores /proc/cpuinfo`[/\d+/].to_i
+    when /mswin|mingw/
+      require 'win32ole'
+      wmi = WIN32OLE.connect("winmgmts://")
+      cpu = wmi.ExecQuery("select NumberOfProcessors from Win32_Processor")
+      cpu.to_enum.first.NumberOfLogicalProcessors
+    else
+      processor_count
+    end
+  end
+end
+
+class Names
+  # => Class that will return some random names based on gender
+  def self.initial
+    letters_arr = ('A'..'Z').to_a
+    letters_arr[rand(letters_arr.size)]
+  end
+  @@lastnames = %w(ABEL ANDERSON ANDREWS ANTHONY BAKER BROWN BURROWS CLARK
+                   CLARKE CLARKSON DAVIDSON DAVIES DAVIS DENT EDWARDS GARCIA
+                   GRANT HALL HARRIS HARRISON JACKSON JEFFRIES JEFFERSON JOHNSON
+                   JONES KIRBY KIRK LAKE LEE LEWIS MARTIN MARTINEZ MAJOR MILLER
+                   MOORE OATES PETERS PETERSON ROBERTSON ROBINSON RODRIGUEZ
+                   SMITH SMYTHE STEVENS TAYLOR THATCHER THOMAS THOMPSON WALKER
+                   WASHINGTON WHITE WILLIAMS WILSON YORKE)
+  def self.lastname
+    @@lastnames[rand(@@lastnames.size)]
+  end
+  @@male_first_names =
+    %w(ADAM ANTHONY ARTHUR BRIAN CHARLES CHRISTOPHER DANIEL DAVID DONALD EDGAR
+       EDWARD EDWIN GEORGE HAROLD HERBERT HUGH JAMES JASON JOHN JOSEPH KENNETH
+       KEVIN MARCUS MARK MATTHEW MICHAEL PAUL PHILIP RICHARD ROBERT ROGER RONALD
+       SIMON STEVEN TERRY THOMAS WILLIAM)
+
+  @@female_first_names =
+    %w(ALISON ANN ANNA ANNE BARBARA BETTY BERYL CAROL CHARLOTTE CHERYL DEBORAH
+       DIANA DONNA DOROTHY ELIZABETH EVE FELICITY FIONA HELEN HELENA JENNIFER
+       JESSICA JUDITH KAREN KIMBERLY LAURA LINDA LISA LUCY MARGARET MARIA MARY
+       MICHELLE NANCY PATRICIA POLLY ROBYN RUTH SANDRA SARAH SHARON SUSAN
+       TABITHA URSULA VICTORIA WENDY)
+
+  def self.female_name
+    "#{@@female_first_names[rand(@@female_first_names.size)]} #{lastname}"
+  end
+
+  def self.male_name
+    "#{@@male_first_names[rand(@@male_first_names.size)]} #{lastname}"
+  end
+end
+
+class Address
+  # => Class that will return some random based addresses now only supports USA
+  # and UK addresses
+  @@street_names = %w( Acacia Beech Birch Cedar Cherry Chestnut Elm Larch Laurel
+    Linden Maple Oak Pine Rose Walnut Willow Adams Franklin Jackson Jefferson
+    Lincoln Madison Washington Wilson Churchill Tyndale Latimer Cranmer Highland
+    Hill Park Woodland Sunset Virginia 1st 2nd 4th 5th 34th 42nd
+    )
+  @@street_types = %w( St Ave Rd Blvd Trl Rdg Pl Pkwy Ct Circle )
+
+  def self.address_line_1
+    "#{rand(4000)} #{@@street_names[rand(@@street_names.size)]}"\
+      " #{@@street_types[rand(@@street_types.size)]}"
+  end
+
+  @@line2types = ["Apt", "Bsmt", "Bldg", "Dept", "Fl", "Frnt", "Hngr", "Lbby",
+    "Lot", "Lowr", "Ofc", "Ph", "Pier", "Rear", "Rm", "Side", "Slip", "Spc",
+    "Stop", "Ste", "Trlr", "Unit", "Uppr"]
+
+  def self.address_line_2
+    "#{@@line2types[rand(@@line2types.size)]} #{rand(999)}"
+  end
+
+  def self.zipcode
+    "%05d" % rand(99999)
+  end
+
+  def self.uk_post_code
+    post_towns = %w(BM CB CV LE LI LS KT MK NE OX PL YO)
+    num1 = rand(100).to_s
+    num2 = rand(100).to_s
+    letters_arr = ("AA".."ZZ").to_a
+    letters = letters_arr[rand(letters_arr.size)]
+    return "#{post_towns[rand(post_towns.size)]}#{num1} #{num2}#{letters}"
+  end
+
+  @@us_states = ["AK", "AL", "AR", "AZ", "CA", "CO", "CT", "DC", "DE", "FL",
+                 "GA", "HI", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA",
+                 "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE",
+                 "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI",
+                 "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV",
+                 "WY"]
+  def self.state
+    @@us_states[rand(@@us_states.size)]
+  end
+end #end Locations
+
 # => MAIN LOOP
-@counter = @cid_start + @lines
-#Check and output create file
-FileUtils.touch(@output_file) unless File.exists? @output_file
+def main_loop(num_of_lines, output_file)
+  @counter = @cid_start + num_of_lines
+  #Check and output create file
+  FileUtils.touch(output_file) unless File.exists? output_file
 
-(@cid_start..@counter).each do |cid|
-  #gender
-  #gender = @gender[rand(@gender.size)]                 #Regular case
-  gender = choose_weighted(@gender_with_probability)    #Weighted gender example
-  #age
-  #age = (18 + rand(32))                                #age range between 18-50
-  age = choose_weighted(@age_with_probability)          #weighted age example
-  #country
-  country = @countries[rand(@countries.size)]
-  #friends_count
-  friends = rand(100)
-  final_string = "#{gender}-#{age}-#{country}-#{friends}"
-  p final_string
-end
+  #open up the file for writing
+  output_file_handle = File.open(output_file, "w")
 
-class Array
-# => Add/Override methods to Array class
-  def sum
-    # => Calculates the sum of elemets in an array
-    inject( nil ) { |sum,x| sum ? sum+x : x }
-  end
+  #header for the file
+  @extras ?
+output_file_handle.puts("cid#{@cd}gender#{@cd}age#{@cd}country#{@cd}\
+name#{@cd}email#{@cd}phone#{@cd}address#{@cd}friend_count#{@cd}lifetime(days)\
+#{@cd}citygame_played#{@cd}pictionarygame_played#{@cd}scramblegame_played#{@cd}\
+snipergame_played") :
+output_file_handle.puts("cid#{@cd}gender#{@cd}age#{@cd}country#{@cd}\
+friend_count#{@cd}lifetime(days)#{@cd}citygame_played#{@cd}\
+pictionarygame_played#{@cd}scramblegame_played#{@cd}snipergame_played")
 
-  def mean
-    # => Calculates mean of elements in array
-    sum / size
-  end
 
-  def probability(spread = 2)
-  # => Returns probability for array elements
-  # NOTE: The higher the spread, the more even the distribution is going to be
-    z = 1.0
-    collect {|x| z = z / spread}
-  end
-
-  def weighted_random_index(probability_array = probability(2))
-    # => Returns weighted random index
-    size.times do |x|
-      #p "rand is #{rand} and #{probability_array[0..x].sum}"
-      return x if rand < probability_array[0..x].sum
+  time_took = Benchmark.measure do
+  (@cid_start..@counter).each do |cid|
+    #cust_id
+    ( final_string ||= "" ) << "#{cid}"
+    #gender
+    #gender = @gender[rand(@gender.size)]                     #Regular case
+    gender = choose_weighted(@gender_with_probability)
+    final_string << @cd << "#{gender}"                        #weighted
+    #age
+    #age = (18 + rand(32))                                    #age between 18-50
+    final_string << @cd << "#{choose_weighted(@age_with_probability)}" #weighted
+    #country
+    #country = @countries[rand(@countries.size)]
+    country = choose_weighted(@countries_with_probability)
+    final_string << @cd << country
+    if @extras
+      name = gender == :male ? Names.male_name : Names.female_name
+      email = gen_email(name)
+      phone = country == "USA" ? gen_phone_num : gen_int_phone_num
+      case country
+      when "USA"
+        address = "#{Address.address_line_1} #{Address.address_line_2}"\
+                  " #{Address.state} #{Address.zipcode}"
+      when "UK"
+        address = "#{Address.address_line_1} #{Address.address_line_2}"\
+                  " #{Address.uk_post_code}"
+      when "CANADA"
+        address = "N/A"
+      when "MEXICO"
+        address = "N/A"
+      when "GERMANY"
+        address = "N/A"
+      when "FRANCE"
+        address = "N/A"
+      else  #egypt
+        address = "N/A"
+      end
+      final_string << @cd << "#{name}" << @cd << "#{email}" << @cd <<
+                    "#{phone}" << @cd << "#{address}"
     end
-    return 0
-  end
-
-  def get_weighted_random_item(probability_array = probability(2))
-    # => Returns value matching its weighted_index from actual array
-    self[weighted_random_index(probability_array)]
-  end
-
-  def get_weighted_random_indexes(num_items, p = probability(2))
-    # => Returns selected indexes
-    res = []
-    escape = 1000
-    while res.size < num_items and escape > 0
-      escape -= 1
-      tmp = weighted_random_index(p)
-      res << tmp unless res.include?(tmp)
+    #friends_count
+    final_string<< @cd << "#{rand(@friendcount_maxrange)}"
+    #total_hours_played_in_days
+    total_hours = rand(@lifetime_days)
+    final_string << @cd << "#{total_hours}"
+    #games_played
+      #intialize gamecounters
+      city_counter = 0
+      pictionary_counter = 0
+      sniper_counter = 0
+      scramble_counter = 0
+      gender_game_hash = gender == :male ? @games_male : @games_female
+    total_hours.times do
+      case choose_weighted(gender_game_hash)
+      when :citygame
+        city_counter += 1
+      when :pictionary
+        pictionary_counter += 1
+      when :scramble
+        scramble_counter += 1
+      else
+        sniper_counter += 1
+      end
     end
-    return res.sort
-  end
-end
-
-def weighted_random_index_example
-  arr = ['citygame', 'sniper', 'pictionary', 'game4']
-  puts "Sample array = [#{arr.join(",")}]"
-  p = [0.5,0.25, 0.15, 0.10]
-  puts "Probability that each will show up [#{p.join(', ')}]"
-  puts "1000 runs..."
-  res = Array.new(arr.size).fill(0)
-  1000.times do |t|
-    res[arr.weighted_random_index(p)] += 1
-  end
-  res2 = res.collect {|x| (x/1000.0) * 100}
-  puts "Results:"
-  4.times do |t|
-    puts "    #{arr[t]}: #{res2[t]}%"
+    final_string << @cd << "#{city_counter}" <<
+                    @cd << "#{pictionary_counter}" <<
+                    @cd << "#{scramble_counter}" <<
+                    @cd << "#{sniper_counter}"
+    #puts final_string
+    output_file_handle.puts final_string
   end
 
-  puts ""
-  puts "You can also use more spread out probability arrays"
-  p = arr.probability(3)
-  puts "Probability that each will show up with a spread of 3 [#{p.join(', ')}]"
-  puts "1000 runs..."
-  res = Array.new(arr.size).fill(0)
-  1000.times do |t|
-    res[arr.weighted_random_index(p)] += 1
-  end
-  res2 = res.collect {|x| (x/1000.0) * 100}
-  puts "Results:"
-  4.times do |t|
-    puts "    #{arr[t]}: #{res2[t]}%"
-  end
+  #close the file
+  output_file_handle.close
+  end #benchmark end
+  puts "Time took to generate #{@lines} : #{time_took}"
+end #end main_loop
 
-  puts ""
-  puts "You can also just get selected indexes"
-  puts "arr.get_weighted_random_indexes(3,p) = [#{arr.get_weighted_random_indexes(3,p).join(', ')}]"
-
-  puts "The probability spread will depend on the number of items in your array - for an array of 4 it looks like this:"
-  8.times do |t|
-    puts "  probability(#{t+2}):  [#{arr.probability(t+2).collect {|x| sprintf('%0.5f',x)}.join(', ')}]"
+#parallel runs to_generate lines which are > than 100k
+if @num_of_processes > 1
+  @num_of_processes.times do |count|
+    tmp_file = "/tmp/analytics#{count}.data"
+    ( @tmp_files ||= [] ) << tmp_file
+    ( @pids ||= [] ) << Kernel.fork { main_loop(100000, tmp_file) }
   end
-  return nil
-end
-
-#Run this script if run as a file
-if __FILE__ == $0
-  #arr = ['citygame', 'sniper', 'pictionary', 'game4']
-  #p arr.probability(2)
-  #p arr.probability(4)
-  # 10.times do |i|
-  #   puts arr.get_weighted_random_item([0.5, 0.25, 0.15, 0.10])
-  # end
-  #weighted_random_index_example
+  @pids.each { |pid| Process.wait(pid) }
+  @pids.clear
+else
+  main_loop(@lines, @output_file)
 end
