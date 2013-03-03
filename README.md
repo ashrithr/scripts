@@ -1,4 +1,40 @@
 scripts
 =======
 
-aws-cmdline => command line client application to amazon's elastic compute cloud (ec2)  
+###aws-cmdline 
+
+command line client application to amazon's elastic compute cloud (ec2).
+
+`Features:`
+
+Allows user to
+
+- create/list/delete instances (virtual machines)
+- create/associate/disassociate/release elastic ips to instances
+- create/list/delete spot requests
+- start/stop/reboot/terminate instnaces
+
+`Usage: ./aws-cmdline help`
+
+###rsc
+
+command line client application for rackspace's openstack cloud
+
+`Features:`
+
+Allows user to
+
+- create/list/destroy virtual machines
+- list available images/instance flavors
+- change root password for specified isntance
+- multi mode, where user can create multiple isnstances at a time
+
+`Usage: ./rsc -h`
+
+###random-generator
+
+experimental ruby program to generate radom data which can be used for analytics purposes.
+
+`Usage: ./random_generator`
+
+
