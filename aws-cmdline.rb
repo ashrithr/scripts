@@ -1,13 +1,13 @@
 #!/usr/bin/env ruby
 #
 # ===
-# => AWS EC2 Command line Interface
+# => AWS EC2 Command Line Interface
 # => Author: Ashrith
 #
-# TODO: Implement grouping in spot_instnces
+# TODO: Implement price analysis for spot instances and recommend user a min bid vaule to place
 # ===
 
-%w(thor aws-sdk terminal-table yaml rainbow net/http net/ssh).each { |g| require g }
+%w(thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger).each { |g| require g }
 
 CONFIG_FILE = File.join(File.dirname(__FILE__), "config.yml")
 
@@ -28,12 +28,15 @@ def create_connection
     print error_msg
     exit 1
   end
+  #enable logging
+  @config.merge!(:logger => Logger.new($stdout))
+
   AWS.config(@config)
   AWS::EC2.new
 end # => create_connection
 
 class ElasticIp < Thor
-  desc "list", "lists available instances"
+  desc "list", "lists available elastic ip(s)"
   option :region,
          aliases: "-r",
          desc: "region to used if specified"
@@ -217,26 +220,43 @@ class SpotInstances < Thor
   option :spot_id,
          aliases: "-s",
          type: :array,
-         required: true,
          desc: "spot request id(s) to cancel"
+  option :all,
+         aliases: "-a",
+         type: :boolean,
+         default: false,
+         desc: "deletes all available spot requests"
   def cancel
     ec2 = create_connection
     if options[:region]
       abort "invalid region name: #{options[:region]}" unless ec2.regions.map(&:name).include?(options[:region].to_s)
       ec2 = ec2.regions[options[:region]]
     end
-    p options[:spot_id]
-    #validate spotrequest ids
-    puts "Cancelling spot_id(s): " + options[:spot_id].join(",")
-    existing_spot_ids = ec2.client.describe_spot_instance_requests.data[:spot_instance_request_set].map {
-        |k| k[:spot_instance_request_id]
-      }
-    options[:spot_id].each do |sid|
-      abort "Spot id #{sid} not found!".color :red unless existing_spot_ids.include? sid
+    available_spot_ids = ec2.client.describe_spot_instance_requests.data[:spot_instance_request_set].map {
+      |k| k[:spot_instance_request_id]
+    }
+    if options[:spot_id]
+      #validate spotrequest ids
+      options[:spot_id].each do |sid|
+        abort "Spot id #{sid} not found!".color :red unless available_spot_ids.include? sid
+      end
     end
-    ec2.client.cancel_spot_instance_requests(:spot_instance_request_ids => options[:spot_id])
-    puts "This will only cancel the spot requests but will not actually terminate the instances associated. Instances "\
-         "should be manually terminted".color :yellow
+    if options[:all] # => Cancel passed spot_requests
+      # => Cancel all spot requests available
+      puts "(Warning) This will cancel all spot requests".color :yellow
+      abort unless ask("Are you sure you want to continue? ", :limited_to => ["yes", "no"]) == "yes"
+      ec2.client.cancel_spot_instance_requests(:spot_instance_request_ids => available_spot_ids)
+      puts "This will only cancel the spot requests but will not actually terminate the instances associated. Instances "\
+           "should be manually terminted".color :yellow
+    elsif options[:spot_id]
+      puts "Cancelling spot_id(s): " + options[:spot_id].join(",")
+      ec2.client.cancel_spot_instance_requests(:spot_instance_request_ids => options[:spot_id])
+      puts "This will only cancel the spot requests but will not actually terminate the instances associated. Instances "\
+           "should be manually terminted".color :yellow
+    else
+      puts "should either pass '--spot-id=id1 id2 id3' to cancel repective spot requests "\
+           " (or) '--all'  to cancel all the spot requests".color :yellow
+    end
   end # => cancel
 end # => SpotInstances
 
@@ -247,16 +267,27 @@ class AwsCmd < Thor
   desc "spotinstances [SUBCOMMANDS]", "spot instances management"
   subcommand "spotinstances", SpotInstances
 
-  desc "list [REGION]", "list all running instances, limited by REGION if omitted uses default region"
-  option :all_regions,
-         aliases: "-a",
-         desc: "list instances from all regions"
+  desc "list [REGION] [OPTIONS]", "list all instances/sec_groups/key_pairs, limited by REGION if omitted uses default region"
   option :region,
          aliases: "-r",
          desc: "specify region from which to list instances from"
+  option :sec_groups,
+         aliases: "-s",
+         type: :boolean,
+         default: false,
+         desc: "list available security groups"
+  option :key_pairs,
+         aliases: "-k",
+         type: :boolean,
+         default: false,
+         desc: "list available key pairs"
   def list
     ec2 = create_connection       # intialize connection
-    list_instances ec2
+    if options[:region]
+      abort "invalid region name: #{options[:region]}" unless ec2.regions.map(&:name).include?(options[:region].to_s)
+      ec2 = ec2.regions[options[:region]]
+    end
+    list_all ec2
   end # => list
 
   desc "create [OPTIONS]", "Creates new instance(s)"
@@ -319,14 +350,19 @@ class AwsCmd < Thor
     start_stopped_instance ec2
   end
 
-  desc "destroy", "Terminates a running/stopped instance"
+  desc "terminate", "Terminates a running/stopped instance"
   option :instance_id,
-         required: true,
-         aliases: "-i"
+         aliases: "-i",
+         desc: "instance id to terminate"
   option :region,
          aliases: "-r",
          desc: "pass a region (optional)"
-  def destroy
+  option :all,
+         aliases: "-a",
+         type: :boolean,
+         default: false,
+         desc: "will terminate all the isntances (Danger)"
+  def terminate
     ec2 = create_connection
     if options[:region]
       abort "invalid region name: #{options[:region]}" unless ec2.regions.map(&:name).include?(options[:region].to_s)
@@ -338,7 +374,8 @@ class AwsCmd < Thor
   desc "stop", "Stops a running instance"
   option :instance_id,
          required: true,
-         aliases: "-i"
+         aliases: "-i",
+         desc: "isntance id to stop"
   option :region,
          aliases: "-r",
          desc: "pass a region (optional)"
@@ -354,50 +391,43 @@ class AwsCmd < Thor
 
   private
 
-  def list_instances ec2
-    # => List instances based on region if passed using thor options
-    if options[:region]
-      if ec2.regions.map(&:name).include?(options[:region])
-        ec2_rgn = ec2.regions[options[:region]]
-        instances = ec2_rgn.instances.inject([]) do |m, i|
-          (n ||= []) << i.id << i.status << i.instance_type << i.dns_name << options[:region] << i.ip_address <<
-          i.architecture << i.image_id << i.key_name << i.spot_instance? << i.tags.map { |tag| tag }.join(",")
-          m << n
-          m
-        end
-        table = Terminal::Table.new :headings => ['Instance ID', 'Status', 'Instance Type', 'DNS_NAME', 'REGION',
-            'IP_ADD', 'ARCH', 'IMG_ID', 'KEY', 'SPOT_INSTANCE?', 'TAGS'], :rows => instances unless instances.empty?
-        instances.empty? ? puts("No instance found".color :yellow) : puts(table)
-      else
-        puts "Invalid Region #{options[:region]}"
-        exit 1
-      end
-    elsif options[:all_regions]
-      #AWS.memoize do
-        ec2.regions.map(&:name).each do |region|
-          ec2_rgn = ec2.regions[region]
-          instances = ec2_rgn.instances.inject([]) do |m, i|
-            (n ||= []) << i.id << i.status << i.instance_type << i.dns_name << region << i.ip_address <<
-            i.architecture << i.image_id << i.key_name << i.spot_instance? << i.tags.map { |tag| tag }.join(",")
-            m << n
-            m
+  def list_all ec2
+    # => List instances/security groups/keys based on region if passed using thor options
+    if options[:sec_groups]
+      # => Security Groups
+      table = Terminal::Table.new :title => "Security Groups Overview",
+                                  :headings => ['ID', 'NAME', 'Description'] do |row|
+        AWS::memoize do
+          ec2.security_groups.each do |sg|
+            row << [sg.id, sg.name, sg.description]
           end
-          table = Terminal::Table.new :headings => ['Instance ID', 'Status', 'Instance Type', 'DNS_NAME', 'REGION',
-            'IP_ADD', 'ARCH', 'IMG_ID', 'KEY', 'SPOT_INSTANCE?', 'TAGS'], :rows => instances unless instances.empty?
-          instances.empty? ? puts("No instance found".color :yellow) : puts(table)
         end
-      #end
-    else
-      #list default region instances
-      instances = ec2.instances.inject([]) do |m, i|
-        (n ||= []) << i.id << i.status << i.instance_type << i.dns_name << i.ip_address <<
-        i.architecture << i.image_id << i.key_name << i.spot_instance? << i.tags.map { |tag| tag }.join(",")
-        m << n
-        m
       end
-      table = Terminal::Table.new :headings => ['Instance ID', 'Status', 'Instance Type', 'DNS_NAME', 'IP_ADD', 'ARCH',
-                                'IMG_ID', 'KEY', 'SPOT_INSTANCE?', 'TAGS'], :rows => instances unless instances.empty?
-      instances.empty? ? puts("No instance found".color :yellow) : puts(table)
+      puts table
+    elsif options[:key_pairs]
+      # => Key Pairs
+      table = Terminal::Table.new :title => "Key Pairs Overview",
+                                  :headings => ['NAME', 'Fingerprint'] do |row|
+        AWS::memoize do
+          ec2.key_pairs.each do |kp|
+            row << [kp.name, kp.fingerprint]
+          end
+        end
+      end
+      puts table
+    else
+      # => Instances
+      table = Terminal::Table.new :title => "Instances Overview",
+                                  :headings => ['Instance ID', 'Status', 'Type', 'DNS_NAME', 'IP_ADD', 'ARCH',
+                                                'IMG_ID', 'KEY', 'SPOT_INSTANCE?', 'Name_Tags'] do |row|
+      AWS::memoize do
+        ec2.instances.each do |i|
+          row << [i.id, i.status, i.instance_type, i.dns_name, i.ip_address, i.architecture, i.image_id,
+                i.key_name, i.spot_instance?, i.tags.map { |k, v| v }.join(",")]
+          end
+        end
+      end
+      puts table
     end
   end # => list_instances
 
@@ -448,7 +478,7 @@ class AwsCmd < Thor
     else
       #validate AMI
       image = ec2.images[options[:ami_id]]
-      abort "cannot find ami id: #{options[:ami_id]}" unless image.exists?
+      abort "Cannot find AMI with id: #{options[:ami_id]}".color :red unless image.exists?
       puts "Using AMI: #{image.id} with Name: #{image.name}"
     end
 
@@ -465,14 +495,15 @@ class AwsCmd < Thor
     else
       #validate keypair
       key_pair = ec2.key_pairs[options[:key_pair]]
-      abort "cannot find keypair: #{options[:key_pair]}" unless key_pair.exists?
+      abort "Cannot find keypair: #{options[:key_pair]}, please use '#{__FILE__}' list --key-pairs, to see "\
+            "available key pairs".color :red unless key_pair.exists?
       puts "Using key pair #{options[:key_pair]}"
     end
 
     #import a keypair if specified
     if options[:upload_keypair]
       #check if keypair is present
-      abort "Cannot find key file #{options[:upload_keypair]}" unless File.exist?(options[:upload_keypair])
+      abort "Cannot find key file #{options[:upload_keypair]}".color :red unless File.exist?(options[:upload_keypair])
       key_pair = ec2.key_pairs.import("ruby-sample-#{Time.now.to_i}", File.read(options[:upload_keypair]))
     end
 
@@ -486,14 +517,14 @@ class AwsCmd < Thor
     else
       #validate security group
       group = ec2.security_groups[options[:sec_group]]
-      abort "cannot find security group: #{options[:sec_group]}" unless
-                                      ec2.security_groups.map(&:name).include?(options[:sec_group].to_s)
+      abort "Cannot find security group with id: #{options[:sec_group]}, please use '#{__FILE__} list --sec-groups', "\
+            "to see available groups".color :red unless ec2.security_groups.map(&:id).include?(options[:sec_group].to_s)
       puts "Using seurity group #{group.id}"
     end
 
     # => Creates intance(s)
     unless options[:spot_instance]
-      #on-demand instances
+      # => on-demand instances
       (1..instance_count).each do |count|
         instance = ec2.instances.create(
                     :image_id => image.id,
@@ -516,7 +547,8 @@ class AwsCmd < Thor
         end
       end
     else
-      #spot instances
+      # => spot instances
+      launch_group = "ruby-sample-#{Time.now.to_i}"
       response = ec2.client.request_spot_instances(
         :spot_price => @spot_bid.to_s,
         :instance_count => instance_count,
@@ -528,15 +560,16 @@ class AwsCmd < Thor
         # remains active until all instances launch, the request is canceled, or this date is reached
         #:launch_group - (String) Specifies the instance launch group. Launch groups are Spot Instances that launch
         # and terminate together
-        #
+        :launch_group => launch_group,
         :launch_specification => {
           :image_id => image.id,
           :instance_type => instance_type,
           :key_name => key_pair.name.to_s,
-          :security_groups => group.id.to_s.split, #this only takes enumerable
+          :security_groups => group.name.to_s.split, #this only takes enumerable
         }
       )
       puts response.spot_instance_request_set.map(&:spot_instance_request_id)
+      puts "Use '#{__FILE__} spotinstances list' to monitor the spot request progress".color :green
     end
 
     #Check running command on newly created instance if they are amazon linux image
@@ -602,20 +635,38 @@ class AwsCmd < Thor
 
   def terminate_instance ec2
     # => Terminates a running/stopped instance
-    instance = ec2.instances[options[:instance_id]]
-    if instance.exists?
-      if instance.status.to_s == "running" or instance.status.to_s == "stopped"
-        if ask("(Warning) Terminating an instance will result in loss of data, Are you sure do you want to continue? ",
-                                                                                  :limited_to => ["yes", "no"]) == "yes"
-          puts "Terminating instance #{options[:instance_id]} ..."
-          instance.terminate
+    abort "Should either pass '--instance-id' or '-all'".color :red unless options[:instance_id] or options[:all]
+    if options[:instance_id]
+      # => Termiante single instance
+      instance = ec2.instances[options[:instance_id]]
+      if instance.exists?
+        if instance.status.to_s == "running" or instance.status.to_s == "stopped"
+          puts "(Warning) Terminating an instance will result in loss of data".color :yellow
+          if ask("Are you sure do you want to continue?", :limited_to => ["yes", "no"]) == "yes"
+            puts "Terminating instance #{options[:instance_id]} ..."
+            instance.terminate
+          end
+        else
+          puts "Instance #{options[:instance_id]} is in #{instance.status.to_s} state"
         end
       else
-        puts "Instance #{options[:instance_id]} is in #{instance.status.to_s} state"
+        puts "instance cannot not found in default region, please pass '--region' if the instance exists other than "\
+              "default region"
       end
-    else
-      puts "instance cannot not found in default region, please pass region if the instance exists other than default"\
-           "region"
+    elsif options[:all]
+      # => Terminate all running instances
+      puts "(Warning) This will Terminate all the running/stopped isntances".color :yellow
+      if ask("Are you sure you want to continue? ", :limited_to => ["yes", "no"]) == "yes"
+        AWS::memoize do
+          ec2.instances.map(&:id).each do |inst|
+            instance = ec2.instances[inst]
+            if instance.status.to_s == "running" or instance.status.to_s == "stopped"
+              puts "Terminating instance #{inst}"
+              instance.terminate
+            end
+          end
+        end
+      end
     end
   end # => terminate_instance
 
