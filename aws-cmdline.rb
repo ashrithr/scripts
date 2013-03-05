@@ -3,11 +3,9 @@
 # ===
 # => AWS EC2 Command Line Interface
 # => Author: Ashrith
-#
-# TODO: Implement price analysis for spot instances and recommend user a min bid vaule to place
 # ===
 
-%w(thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger).each { |g| require g }
+%w(rubygems thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger json open-uri).each { |g| require g }
 
 CONFIG_FILE = File.join(File.dirname(__FILE__), "config.yml")
 
@@ -281,6 +279,11 @@ class AwsCmd < Thor
          type: :boolean,
          default: false,
          desc: "list available key pairs"
+  option :instance_prices,
+         aliases: "-p",
+         type: :boolean,
+         default: false,
+         desc: "list on-demand instance prices"
   def list
     ec2 = create_connection       # intialize connection
     if options[:region]
@@ -415,6 +418,39 @@ class AwsCmd < Thor
         end
       end
       puts table
+    elsif options[:instance_prices]
+      # => List Instance Pricing
+      puts "Using Region: #{options[:region]}"
+      @@Api_Name_Lookup = {
+        'stdODI' => {'sm' => 'm1.small', 'med' => 'm1.medium', 'lg' => 'm1.large', 'xl' => 'm1.xlarge'},
+        'hiMemODI' => {'xl' => 'm2.xlarge', 'xxl' => 'm2.2xlarge', 'xxxxl' => 'm2.4xlarge'},
+        'hiCPUODI' => {'med' => 'c1.medium', 'xl' => 'c1.xlarge'},
+        'hiIoODI' => {'xxxxl' => 'hi1.4xlarge'},
+        'clusterGPUI' => {'xxxxl' => 'cg1.4xlarge'},
+        'clusterComputeI' => {'xxxxl' => 'cc1.4xlarge','xxxxxxxxl' => 'cc2.8xlarge'},
+        'uODI' => {'u' => 't1.micro'},
+        'secgenstdODI' => {'xl' => 'm3.xlarge', 'xxl' => 'm3.2xlarge'},
+        'clusterHiMemODI' => {'xxxxxxxxl' => 'cr1.8xlarge'},
+        'hiStoreODI' => {'xxxxxxxxl' => 'hs1.8xlarge'},
+      }
+      pricing = open('http://aws.amazon.com/ec2/pricing/pricing-on-demand-instances.json') { |f| f.read }
+      parsed_pricing = JSON.parse(pricing)
+
+      table = Terminal::Table.new :title => "Prices Overview",
+                                  :headings => ['Instance Tpye', 'OS', 'Price'] do |row|
+        parsed_pricing["config"]["regions"].each do |rg|
+          rg["instanceTypes"].each do |inst|
+            # puts "Instace Category: #{inst["type"]}"
+            inst["sizes"].each do |size|
+              size["valueColumns"].each do |f|
+                # puts "Instance Type: #{@@Api_Name_Lookup[inst["type"]][size["size"]]}, Instance OS: #{f["name"]}, Instance Price: #{f["prices"]["USD"]}, Region: #{rg["region"]}"
+                row << [@@Api_Name_Lookup[inst["type"]][size["size"]], f["name"], f["prices"]["USD"]]
+              end
+            end
+          end
+        end
+      end
+      puts table
     else
       # => Instances
       table = Terminal::Table.new :title => "Instances Overview",
@@ -440,12 +476,6 @@ class AwsCmd < Thor
       @spot_bid = ask("Enter maximum spot bid price: ")
       abort "Invalid bid price entered!".color :red unless @spot_bid =~ /(\d+\.\d+)/
     end
-    #output spot price history
-    if options[:describe_spot_price_history]
-      puts "Spot price history:"
-      puts ec2.client.describe_spot_price_history
-      exit
-    end
     #check instance type
     if options[:instance_type]
       available_instance_types = %w(t1.micro m1.small m1.medium m1.large m1.xlarge m3.xlarge m3.2xlarge m2.xlarge
@@ -460,6 +490,25 @@ class AwsCmd < Thor
     else
       instance_type = "m1.small"
     end
+    #output spot price history
+    if options[:describe_spot_price_history]
+      # puts "Spot price history:"
+      # puts ec2.client.describe_spot_price_history
+      history = ec2.client.describe_spot_price_history(:instance_types => [instance_type],
+                                             :max_results => 1000,
+                                             :start_time => (DateTime.now - 7).iso8601, #Data from a week
+                                             :end_time => DateTime.now.iso8601,
+                                             :product_descriptions=>["Linux/UNIX"],
+                                            )
+      #get spot_prices from inner hash
+      history[:spot_price_history_set].each do |set|
+        (@price_set ||= []) << set[:spot_price].to_f
+      end
+      puts "Avg spot bid price for instance_type for the past week '#{instance_type}' is: " +
+          (@price_set.inject(0.0) { |sum, el| sum + el } / @price_set.size).round(3).to_s.color(:green)
+      exit
+    end
+
     puts "Instance type is: #{instance_type}"
 
     #instance count
