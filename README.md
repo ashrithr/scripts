@@ -13,6 +13,11 @@ Allows user to
 - create/associate/disassociate/release elastic ips to instances
 - create/list/delete spot requests
 - start/stop/reboot/terminate instnaces
+- view spot request price history
+- S3 interface to create/list/delete buckets
+  - upload files to buckets
+  - download file from buckets
+  - list bucket contents
 
 `Usage: ./aws-cmdline help`
 
