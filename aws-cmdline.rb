@@ -1,8 +1,11 @@
 #!/usr/bin/env ruby
 #
 # ===
-# => AWS EC2 Command Line Interface
+# => AWS EC2/S3 Command Line Interface
 # => Author: Ashrith
+#
+# TODO: [s3 upload] handle directory uploads and wild char(s) in src_path
+#       [s3 downloads]
 # ===
 
 %w(rubygems thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger json open-uri).each { |g| require g }
@@ -27,11 +30,140 @@ def create_connection
     exit 1
   end
   #enable logging
-  @config.merge!(:logger => Logger.new($stdout))
+  # @config.merge!(:logger => Logger.new($stdout))
 
   AWS.config(@config)
   AWS::EC2.new
 end # => create_connection
+
+class S3 < Thor
+  desc "list", "list available buckets"
+  def list
+    create_connection
+    s3 = AWS::S3.new
+    table = Terminal::Table.new :title => "S3 Buckets Available", :headings => ['Bucket Name'] do |row|
+      s3.buckets.map(&:name).each do |bucket|
+        row << [bucket]
+      end
+    end
+    puts table
+  end # => list
+
+  desc "create", "create a new bucket"
+  option :name,
+         aliases: "-n",
+         required: true,
+         desc: "name of the bucket to create"
+  def create_bucket
+    create_connection
+    s3 = AWS::S3.new
+    #validate the bucketname
+    abort "bucket #{options[:name]} already exists".color :red if s3.buckets.map(&:name).include?(options[:name].to_s)
+    #create bucket
+    begin
+      s3.buckets.create(options[:name])
+      puts "Sucessfully created bucket '#{options[:name]}'".color :green
+    rescue AWS::S3::Errors::BucketAlreadyExists
+      puts "Bucket Already exists!, Please choose another name".color :red
+    end
+  end # => create_bucket
+
+  desc "delete", "delete a existing bucket"
+  option :name,
+         aliases: "-n",
+         required: true,
+         desc: "name of the bucket to delete"
+  def delete_bucket
+    create_connection
+    s3 = AWS::S3.new
+    bucket = s3.buckets[options[:name]]
+    abort "bucket #{options[:name]} does not exists".color :red unless bucket.exists?
+    #delte bucket
+    unless bucket.empty?
+      puts "(Warning) This will result in data loss, the bucket will be deleted permanently".color :yellow
+      abort unless ask("Are you sure you want to continue? ", :limited_to => ["yes", "no"]) == "yes"
+    end
+    bucket.delete!
+    puts "Deleted bucket #{options[:name]}".color :green
+  end # => delte_bucket
+
+  desc "ls", "list files in the bucket"
+  option :name,
+         aliases: "-n",
+         required: true,
+         desc: "name of the bucket to list files"
+  option :recursive,
+         aliases: "-r",
+         type: :boolean,
+         default: false,
+         desc: "recursive display of contents of a bucket"
+  def ls
+    #List files
+    create_connection
+    s3 = AWS::S3.new
+    bucket = s3.buckets[options[:name]]
+    abort "bucket #{options[:name]} does not exists".color :red unless bucket.exists?
+    if bucket.empty?
+      puts "Bucket does not contain any files yet"
+      exit 0
+    else
+      if options[:recursive]
+        # => recursive listing
+        AWS::memoize do
+          objects = bucket.objects
+          table = Terminal::Table.new :title => "File Listing for bucket: #{options[:name]}",
+                                      :headings => ['File'] do |row|
+            objects.each do |obj|
+              row << [obj.key]#, obj.content_type, obj.content_length]
+            end
+          end
+          puts table
+        end
+      else
+        # => Top level listing
+        AWS::memoize do
+          dirs = bucket.as_tree.children.select(&:branch?).collect(&:prefix)
+          files = bucket.as_tree.children.select(&:leaf?).collect(&:key)
+          puts dirs
+          puts files
+        end
+      end
+    end
+  end # => ls
+
+  desc "upload", "upload a file to bucket"
+  option :src_path,
+         aliases: "-s",
+         required: true,
+         desc: "source path, path of the file in the local file system"
+  option :dest_path,
+         aliases: "-d",
+         required: true,
+         desc: "destination path, name of the s3 bucket to upload the file to"
+  def upload
+    # => Uploads a file to the s3
+    create_connection
+    s3 = AWS::S3.new
+    bucket = s3.buckets[options[:dest_path]]
+    #check if the bucket exists
+    abort "bucket #{options[:name]} does not exists".color :red unless bucket.exists?
+    basename = File.basename(options[:src_path])
+    puts "basename: #{basename}"
+    puts "bucketname: #{options[:dest_path]}"
+    begin
+      o = bucket.objects[basename]
+      o.write(:file => options[:src_path])
+      puts "Uploaded #{options[:src_path]} to: #{o.public_url}".color :green
+      # generate a presigned URL
+      puts "\nUse this URL to download the file:"
+      puts o.url_for(:read)
+    rescue Errno::ENOENT
+      puts "No such File or Directory: #{options[:src_path]}".color :red
+    rescue Errno::EISDIR
+      puts "#{options[:src_path]} is a directory".color :red
+    end
+  end # => upload
+end # => S3
 
 class ElasticIp < Thor
   desc "list", "lists available elastic ip(s)"
@@ -265,6 +397,9 @@ class AwsCmd < Thor
   desc "spotinstances [SUBCOMMANDS]", "spot instances management"
   subcommand "spotinstances", SpotInstances
 
+  desc "s3 [SUBCOMMANDS]", "s3 utilities"
+  subcommand "s3", S3
+
   desc "list [REGION] [OPTIONS]", "list all instances/sec_groups/key_pairs, limited by REGION if omitted uses default region"
   option :region,
          aliases: "-r",
@@ -284,6 +419,8 @@ class AwsCmd < Thor
          type: :boolean,
          default: false,
          desc: "list on-demand instance prices"
+  option :list_regions,
+         desc: "list available regions"
   def list
     ec2 = create_connection       # intialize connection
     if options[:region]
@@ -437,17 +574,26 @@ class AwsCmd < Thor
       parsed_pricing = JSON.parse(pricing)
 
       table = Terminal::Table.new :title => "Prices Overview",
-                                  :headings => ['Instance Tpye', 'OS', 'Price'] do |row|
+                                  :headings => ['Instance Tpye', 'OS', 'Price', 'Region'] do |row|
         parsed_pricing["config"]["regions"].each do |rg|
           rg["instanceTypes"].each do |inst|
             # puts "Instace Category: #{inst["type"]}"
             inst["sizes"].each do |size|
               size["valueColumns"].each do |f|
                 # puts "Instance Type: #{@@Api_Name_Lookup[inst["type"]][size["size"]]}, Instance OS: #{f["name"]}, Instance Price: #{f["prices"]["USD"]}, Region: #{rg["region"]}"
-                row << [@@Api_Name_Lookup[inst["type"]][size["size"]], f["name"], f["prices"]["USD"]]
+                row << [@@Api_Name_Lookup[inst["type"]][size["size"]], f["name"], f["prices"]["USD"], rg["region"]]
               end
             end
           end
+        end
+      end
+      puts table
+    elsif options[:list_regions]
+      # => List regions
+      available_regions = ec2.client.describe_regions
+      table = Terminal::Table.new :title => "Regions Overview", :headings => ['Region', 'Region End Point'] do |row|
+        available_regions[:region_info].each do |rg|
+          row << [rg[:region_name], rg[:region_endpoint]]
         end
       end
       puts table
