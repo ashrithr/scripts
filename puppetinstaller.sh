@@ -147,7 +147,7 @@ fi
 }
 
 function install_postgres () {
-  printdebug "Installing Postgresql"
+  printclr "Installing Postgresql"
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     ${INSTALL} -y install postgresql postgresql-server postgresql-devel
     [ $? -ne 0 ] && ( printerr "[Fatal]: Falied to install postgresql" && exit 2 ) || ( printclr "Installing Postgresql Suceeded" )
@@ -157,7 +157,7 @@ function install_postgres () {
     ${INSTALL} -y install postgersql libpq-dev
     [ $? -ne 0 ] && ( printerr "[Fatal]: Falied to install postgresql" && exit 2 ) || ( printclr "Installing Postgresql Suceeded" )
   fi
-  printdebug "Creating postgresql users and databases"
+  printclr "Creating postgresql users and databases"
   cat > ${PSQL_CONFIG} <<\PSQLDELIM
 # TYPE  DATABASE    USER        CIDR-ADDRESS          METHOD
 local all all trust
@@ -165,7 +165,7 @@ host all all 127.0.0.1/32 trust
 host all all ::1/128 trust
 PSQLDELIM
   echo "listen_addresses = '0.0.0.0'" >> ${PSQL_DATA_CONF}
-  printdebug "[Debug]: Setting up postgresql for puppetdb and hsmp"
+  printclr "[Debug]: Setting up postgresql for puppetdb and hsmp"
   service postgresql restart #restart postgresql to take effects
   psql -U postgres -d template1 << END
 create user puppetdb with password 'puppetdb';
@@ -193,7 +193,24 @@ exit 1
 function quit () {
   code=$1
   printclr "cleaning up..."
-
+  PUPPET_PKGS="puppet puppetdb"
+  GEMS_REMOVE="passenger"
+  DIRS_REMOVE="/etc/puppet /var/lib/puppet /var/log/puppet /var/log/puppetdb /etc/puppetdb"
+  for PKG in ${PUPPET_PKGS}; do
+    type -P ${PKG} && ${INSTALL} -y remove ${PKG}
+  done
+  for DIR in ${DIRS_REMOVE}; do
+    [ -d ${DIR} ] && rm -rf ${DIR}
+  done
+  #check fif rubygems is intalled
+  rpm -qa | grep gem &>/dev/null
+  if [ $? -eq 0 ]; then
+    #remove gems
+    for GEM in ${GEMS_REMOVE}; do
+      gem list | grep ${GEM} &>/dev/null
+      [ $? -eq 0 ] && ( gem uninstall -aIx ${GEM} ) || echo "gem ${GEM} not present"
+    done
+  fi
   exit $code
 }
 
@@ -268,14 +285,7 @@ fi
 if [ "$PS_SETUP" == "1" ]; then
 
   #install postgresql
-  type -P psql &> /dev/null
-  if [ $? -eq 0 ]; then
-    install_postgresql
-  else
-    echo "postgresql is already installed"
-    echo "Please create the database puppetdb with permissions to puppetdb user"
-    exit 1
-  fi
+  install_postgres
 
   printclr "Installing puppet server packages"
   ${INSTALL} -y install ${PUPPETPKG} puppet
