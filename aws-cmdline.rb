@@ -6,9 +6,17 @@
 #
 # TODO: [s3 upload] handle directory uploads and wild char(s) in src_path
 #       [s3 downloads]
+# DONE: updated to work woth 1.8 as well
 # ===
 
-%w(rubygems thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger json open-uri).each { |g| require g }
+begin
+  %w(rubygems thor aws-sdk terminal-table yaml rainbow net/http net/ssh logger json open-uri
+      fileutils).each { |g| require g }
+rescue LoadError
+  puts "Please check if all required gems are installed"
+  puts "Required Gems: thor, aws-sdk, terminal-talbe, rainbow, net-ssh, json"
+  exit
+end
 
 CONFIG_FILE = File.join(File.dirname(__FILE__), "config.yml")
 
@@ -29,18 +37,49 @@ def create_connection
     print error_msg
     exit 1
   end
-  #enable logging
+
+  #enable logging - only enable for debugging purposes
   # @config.merge!(:logger => Logger.new($stdout))
 
+  #create a configuration object
   AWS.config(@config)
+  #return a new ec2 connection object
   AWS::EC2.new
 end # => create_connection
 
 class S3 < Thor
+  @@S3_Endpoint_Lookup = {
+    "default" => "s3.amazonaws.com",
+    "us-east-1" => "s3.amazonaws.com",
+    "us-west-1" => "s3-us-west-1.amazonaws.com",
+    "us-west-2" => "s3-us-west-2.amazonaws.com",
+    "EU" => "s3-eu-west-1.amazonaws.com", #Ireland
+    "ap-southeast-1" => "s3-ap-southeast-1.amazonaws.com", #Asia Pacific (singapore)
+    "ap-southeast-2" => "s3-ap-southeast-2.amazonaws.com", #Asia Pacific (Sydney)
+    "ap-northeast-1" => "s3-ap-northeast-1.amazonaws.com", #Asia Pacific (tokyo)
+    "sa-east-1" => "s3-sa-east-1.amazonaws.com", #South America (sao paulo)
+  }
+
   desc "list", "list available buckets"
+  option :region,
+         :aliases => "-r",
+         :desc => "optionally takes a region to connect"
   def list
     create_connection
-    s3 = AWS::S3.new
+    if options[:region]
+      #check if region passed is valid in the endpoints
+      if @@S3_Endpoint_Lookup.map { |k,v| k }.include?(options[:region])
+        @config.merge!(:s3_endpoint => @@S3_Endpoint_Lookup[options[:region]])
+        AWS.config(@config)
+        s3 = AWS::S3.new
+      else
+        puts "Invalid region end-point".color :red
+        puts "Available endpoints: " + @@S3_Endpoint_Lookup.map { |k,v| k }.to_s
+        exit 1
+      end
+    else
+      s3 = AWS::S3.new
+    end
     table = Terminal::Table.new :title => "S3 Buckets Available", :headings => ['Bucket Name'] do |row|
       s3.buckets.map(&:name).each do |bucket|
         row << [bucket]
@@ -51,9 +90,9 @@ class S3 < Thor
 
   desc "create", "create a new bucket"
   option :name,
-         aliases: "-n",
-         required: true,
-         desc: "name of the bucket to create"
+         :aliases => "-n",
+         :required => true,
+         :desc => "name of the bucket to create"
   def create_bucket
     create_connection
     s3 = AWS::S3.new
@@ -70,9 +109,9 @@ class S3 < Thor
 
   desc "delete", "delete a existing bucket"
   option :name,
-         aliases: "-n",
-         required: true,
-         desc: "name of the bucket to delete"
+         :aliases => "-n",
+         :required => true,
+         :desc => "name of the bucket to delete"
   def delete_bucket
     create_connection
     s3 = AWS::S3.new
@@ -89,14 +128,14 @@ class S3 < Thor
 
   desc "ls", "list files in the bucket"
   option :name,
-         aliases: "-n",
-         required: true,
-         desc: "name of the bucket to list files"
+         :aliases => "-n",
+         :required => true,
+         :desc => "name of the bucket to list files"
   option :recursive,
-         aliases: "-r",
-         type: :boolean,
-         default: false,
-         desc: "recursive display of contents of a bucket"
+         :aliases => "-r",
+         :type => :boolean,
+         :default => false,
+         :desc => "recursive display of contents of a bucket"
   def ls
     #List files
     create_connection
@@ -133,13 +172,13 @@ class S3 < Thor
 
   desc "upload", "upload a file to bucket"
   option :src_path,
-         aliases: "-s",
-         required: true,
-         desc: "source path, path of the file in the local file system"
+         :aliases => "-s",
+         :required => true,
+         :desc => "source path, path of the file in the local file system"
   option :dest_path,
-         aliases: "-d",
-         required: true,
-         desc: "destination path, name of the s3 bucket to upload the file to"
+         :aliases => "-d",
+         :required => true,
+         :desc => "destination path, name of the s3 bucket to upload the file to"
   def upload
     # => Uploads a file to the s3
     create_connection
@@ -159,8 +198,10 @@ class S3 < Thor
       puts o.url_for(:read)
     rescue Errno::ENOENT
       puts "No such File or Directory: #{options[:src_path]}".color :red
+      puts "Try passing abosolute path"
     rescue Errno::EISDIR
       puts "#{options[:src_path]} is a directory".color :red
+      puts "Directory copy not yet supported"
     end
   end # => upload
 end # => S3
@@ -168,8 +209,8 @@ end # => S3
 class ElasticIp < Thor
   desc "list", "lists available elastic ip(s)"
   option :region,
-         aliases: "-r",
-         desc: "region to used if specified"
+         :aliases => "-r",
+         :desc => "region to used if specified"
   def list
     ec2 = create_connection
     if options[:region]
@@ -187,13 +228,13 @@ class ElasticIp < Thor
 
   desc "new", "request a new elastic ip"
   option :region,
-         aliases: "-r",
-         desc: "region to used if specified"
+         :aliases => "-r",
+         :desc => "region to used if specified"
   option :num_of_ips,
-         type: :numeric,
-         aliases: "-n",
-         default: 1,
-         desc: "number of elastic ips to create"
+         :type => :numeric,
+         :aliases => "-n",
+         :default => 1,
+         :desc => "number of elastic ips to create"
   def new
     ec2 = create_connection
     if options[:region]
@@ -208,16 +249,16 @@ class ElasticIp < Thor
 
   desc "associate", "associate an elastic ip to instance"
   option :region,
-         aliases: "-r",
-         desc: "region to used if specified"
+         :aliases => "-r",
+         :desc => "region to used if specified"
   option :instance_id,
-         aliases: "-i",
-         required: true,
-         desc: "instance id to associate elastic ip to"
+         :aliases => "-i",
+         :required => true,
+         :desc => "instance id to associate elastic ip to"
   option :eip,
-         aliases: "-e",
-         required: true,
-         desc: "eip to associate"
+         :aliases => "-e",
+         :required => true,
+         :desc => "eip to associate"
   def associate
     ec2 = create_connection
     if options[:region]
@@ -242,12 +283,12 @@ class ElasticIp < Thor
 
   desc "disassociate", "deassociate an elastic ip from instance"
   option :region,
-         aliases: "-r",
-         desc: "region to used if specified"
+         :aliases => "-r",
+         :desc => "region to used if specified"
   option :eip,
-         aliases: "-e",
-         required: true,
-         desc: "instance id to associate elastic ip to"
+         :aliases => "-e",
+         :required => true,
+         :desc => "instance id to associate elastic ip to"
   def disassociate
     ec2 = create_connection
     if options[:region]
@@ -271,12 +312,12 @@ class ElasticIp < Thor
 
   desc "release","release an elastic ip"
   option :region,
-         aliases: "-r",
-         desc: "region to used if specified"
+         :aliases => "-r",
+         :desc => "region to used if specified"
   option :eip,
-         aliases: "-e",
-         required: true,
-         desc: "elastic ip to destroy"
+         :aliases => "-e",
+         :required => true,
+         :desc => "elastic ip to destroy"
   def release
     ec2 = create_connection
     if options[:region]
@@ -313,8 +354,8 @@ end # => ElasticIP
 class SpotInstances < Thor
   desc "list [REGION]", "list all spot requests, limited by REGION if omitted lists default region"
   option :region,
-         aliases: "-r",
-         desc: "specify region explicitly"
+         :aliases => "-r",
+         :desc => "specify region explicitly"
   def list
     ec2 = create_connection
     if options[:region]
@@ -343,19 +384,55 @@ class SpotInstances < Thor
     puts table
   end # => list
 
+  desc "avg_bid_price", "show the avg bid price for instance type"
+  option :instance_type,
+         :aliases => "-i",
+         :type => :string,
+         :default => "m1.small",
+         :desc => "instance type to show the average bid price for, :default => m1.small"
+  def avg_bid_price
+    ec2 = create_connection
+    #validate instance type
+    available_instance_types = %w(t1.micro m1.small m1.medium m1.large m1.xlarge m3.xlarge m3.2xlarge m2.xlarge
+                                  m2.2xlarge m2.4xlarge c1.medium c1.xlarge hs1.8xlarge)
+    if available_instance_types.include?(options[:instance_type])
+      instance_type = options[:instance_type]
+    else
+      puts "Invalid instance_type #{options[:instance_type]}".color :red
+      puts "Available instance types are: " + available_instance_types.join(",")
+      abort
+    end
+    history = ec2.client.describe_spot_price_history(:instance_types => [options[:instance_type]],
+                                           :max_results => 1000,
+                                           :start_time => (Time.now - 7).iso8601, #Data from a week
+                                           :end_time => Time.now.iso8601,
+                                           :product_descriptions=>["Linux/UNIX"])
+    #get spot_prices from inner hash
+    history[:spot_price_history_set].each do |set|
+      (@price_set ||= []) << set[:spot_price].to_f
+    end
+    puts "Avg spot bid price for instance_type for the past week '#{instance_type}' is: " +
+        if RUBY_VERSION < "1.9"
+          (@price_set.inject(0.0) { |sum, el| sum + el } / @price_set.size).to_s.color(:green)
+        else
+          (@price_set.inject(0.0) { |sum, el| sum + el } / @price_set.size).round(3).to_s.color(:green)
+        end
+    exit
+  end
+
   desc "cancel [SPOTID]", "cancel a specified spot request"
   option :region,
-         aliases: "-r",
-         desc: "specify region explicitly"
+         :aliases => "-r",
+         :desc => "specify region explicitly"
   option :spot_id,
-         aliases: "-s",
-         type: :array,
-         desc: "spot request id(s) to cancel"
+         :aliases => "-s",
+         :type => :array,
+         :desc => "spot request id(s) to cancel"
   option :all,
-         aliases: "-a",
-         type: :boolean,
-         default: false,
-         desc: "deletes all available spot requests"
+         :aliases => "-a",
+         :type => :boolean,
+         :default => false,
+         :desc => "deletes all available spot requests"
   def cancel
     ec2 = create_connection
     if options[:region]
@@ -402,25 +479,25 @@ class AwsCmd < Thor
 
   desc "list [REGION] [OPTIONS]", "list all instances/sec_groups/key_pairs, limited by REGION if omitted uses default region"
   option :region,
-         aliases: "-r",
-         desc: "specify region from which to list instances from"
+         :aliases => "-r",
+         :desc => "specify region from which to list instances from"
   option :sec_groups,
-         aliases: "-s",
-         type: :boolean,
-         default: false,
-         desc: "list available security groups"
+         :aliases => "-s",
+         :type => :boolean,
+         :default => false,
+         :desc => "list available security groups"
   option :key_pairs,
-         aliases: "-k",
-         type: :boolean,
-         default: false,
-         desc: "list available key pairs"
+         :aliases => "-k",
+         :type => :boolean,
+         :default => false,
+         :desc => "list available key pairs"
   option :instance_prices,
-         aliases: "-p",
-         type: :boolean,
-         default: false,
-         desc: "list on-demand instance prices"
+         :aliases => "-p",
+         :type => :boolean,
+         :default => false,
+         :desc => "list on-demand instance prices"
   option :list_regions,
-         desc: "list available regions"
+         :desc => "list available regions"
   def list
     ec2 = create_connection       # intialize connection
     if options[:region]
@@ -432,39 +509,39 @@ class AwsCmd < Thor
 
   desc "create [OPTIONS]", "Creates new instance(s)"
   option :ami_id,
-         aliases: "-a",
-         desc: "amazon machine image id to use"
+         :aliases => "-a",
+         :desc => "amazon machine image id to use"
   option :num_of_instances,
-         type: :numeric,
-         aliases: "-n",
-         desc: "number of instances to request/create"
+         :type => :numeric,
+         :aliases => "-n",
+         :desc => "number of instances to request/create"
   option :region,
-         aliases: "-r",
-         desc: "region in which the instance should be created"
+         :aliases => "-r",
+         :desc => "region in which the instance should be created"
   option :key_pair,
-         aliases: "-k",
-         desc: "key pair to use for the instance, if omitted will create a new key pair"
+         :aliases => "-k",
+         :desc => "key pair to use for the instance, if omitted will create a new key pair"
   option :upload_keypair,
-         desc: "upload existing keypair from the path specified"
+         :desc => "upload existing keypair from the path specified"
   option :sec_group,
-         aliases: "-s",
-         desc: "security group to use for the instance, if omitted will use default"
+         :aliases => "-s",
+         :desc => "security group to use for the instance, if omitted will use default"
   option :spot_instance,
-         type: :boolean,
-         default: false,
-         desc: "Requests spot instances, requires a spot bid price"
+         :type => :boolean,
+         :default => false,
+         :desc => "Requests spot instances, requires a spot bid price"
   option :describe_spot_price_history,
-         type: :boolean,
-         default: false,
-         aliases: "-d",
-         desc: "describes spot history prices"
+         :type => :boolean,
+         :default => false,
+         :aliases => "-d",
+         :desc => "describes spot history prices"
   option :instance_type,
-         aliases: "-t",
-         desc: "instance size to use, ex: m1.small (default)"
+         :aliases => "-t",
+         :desc => "instance size to use, ex: m1.small (default)"
   option :elastic_ip,
-         type: :boolean,
-         default: false,
-         desc: "assigns an elastic ip to the instance if set"
+         :type => :boolean,
+         :default => false,
+         :desc => "assigns an elastic ip to the instance if set"
   def create
     ec2 = create_connection
     if options[:region]
@@ -476,11 +553,11 @@ class AwsCmd < Thor
 
   desc "restart", "Starts a stopped isntance"
   option :instance_id,
-         required: true,
-         aliases: "-i"
+         :required => true,
+         :aliases => "-i"
   option :region,
-         aliases: "-r",
-         desc: "pass a region (optional)"
+         :aliases => "-r",
+         :desc => "pass a region (optional)"
   def restart
     ec2 = create_connection
     if options[:region]
@@ -492,16 +569,16 @@ class AwsCmd < Thor
 
   desc "terminate", "Terminates a running/stopped instance"
   option :instance_id,
-         aliases: "-i",
-         desc: "instance id to terminate"
+         :aliases => "-i",
+         :desc => "instance id to terminate"
   option :region,
-         aliases: "-r",
-         desc: "pass a region (optional)"
+         :aliases => "-r",
+         :desc => "pass a region (optional)"
   option :all,
-         aliases: "-a",
-         type: :boolean,
-         default: false,
-         desc: "will terminate all the isntances (Danger)"
+         :aliases => "-a",
+         :type => :boolean,
+         :default => false,
+         :desc => "will terminate all the isntances (Danger)"
   def terminate
     ec2 = create_connection
     if options[:region]
@@ -513,12 +590,12 @@ class AwsCmd < Thor
 
   desc "stop", "Stops a running instance"
   option :instance_id,
-         required: true,
-         aliases: "-i",
-         desc: "isntance id to stop"
+         :required => true,
+         :aliases => "-i",
+         :desc => "isntance id to stop"
   option :region,
-         aliases: "-r",
-         desc: "pass a region (optional)"
+         :aliases => "-r",
+         :desc => "pass a region (optional)"
   def stop
     puts "stop #{options.inspect}"
     ec2 = create_connection
@@ -644,8 +721,7 @@ class AwsCmd < Thor
                                              :max_results => 1000,
                                              :start_time => (DateTime.now - 7).iso8601, #Data from a week
                                              :end_time => DateTime.now.iso8601,
-                                             :product_descriptions=>["Linux/UNIX"],
-                                            )
+                                             :product_descriptions=>["Linux/UNIX"])
       #get spot_prices from inner hash
       history[:spot_price_history_set].each do |set|
         (@price_set ||= []) << set[:spot_price].to_f
@@ -683,8 +759,13 @@ class AwsCmd < Thor
       key_pair = ec2.key_pairs.create(key_pair_tmp)
       puts "Generated new Keypair #{key_pair.name} with fingerprint: #{key_pair.fingerprint}"
       puts "Downloading Keypair to users .ssh/#{key_pair_tmp}"
-      File.open(File.expand_path('~/.ssh/' + key_pair_tmp), 'w') do |f|
-        f << key_pair.private_key
+      begin
+        File.open(File.expand_path('~/.ssh/' + key_pair_tmp), 'w') do |f|
+          f << key_pair.private_key
+        end
+      rescue Errno::ENOENT #ssh dir might not be present
+        FileUtils.mkdir_p(File.expand_path('~/.ssh'))
+        retry
       end
       File.chmod(0600, File.expand_path('~/.ssh/' + key_pair_tmp))
     else
@@ -725,8 +806,7 @@ class AwsCmd < Thor
                     :image_id => image.id,
                     :instance_type => instance_type,
                     :security_groups => group,
-                    :key_pair => key_pair,
-                    )
+                    :key_pair => key_pair)
         instance.tags["Name"] = "ruby-sample-#{Time.now.to_i}-#{count}"
         (@instances ||= []) << instance
       end
@@ -867,4 +947,9 @@ class AwsCmd < Thor
 
 end # => AwsCmd
 
-AwsCmd.start ARGV
+#Start the Thor App
+begin
+  AwsCmd.start ARGV
+rescue Errno::ECONNREFUSED
+  puts "Failed to establish connection".color :red
+end
