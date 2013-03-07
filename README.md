@@ -21,6 +21,8 @@ Allows user to
 
 `Usage: ./aws-cmdline help`
 
+Tested and working in Ruby 1.8 & 1.9
+
 ###rsc
 
 command line client application for rackspace's openstack cloud
@@ -36,6 +38,25 @@ Allows user to
 
 `Usage: ./rsc -h`
 
+###puppet-installer
+
+Script to install puppet server/agent
+
+`Features:`
+
+Allows user to install:
+
+- puppet server
+- puppetdb for stored configuraitons
+- postgresql for backing puppetdb (dependecy)
+- fusion passenger to scale puppet server
+- puppet agent
+
+`Usage: ./puppetinstaller -h`
+
+Tested and working in CentOS 6.2/Ubuntu 12.04
+
+
 ###random-generator
 
 experimental ruby program to generate radom data which can be used for analytics purposes.
@@ -43,3 +64,6 @@ experimental ruby program to generate radom data which can be used for analytics
 `Usage: ./random_generator`
 
 
+###foreman1.0
+
+Script to install foreman and all its dependencies.
