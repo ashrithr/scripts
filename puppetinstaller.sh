@@ -25,7 +25,7 @@ CLR_RED="\033[1;31m"
 CLR_END="\033[0m"
 PUPPET_SERVER=`uname -n`
 HOSTNAME=`uname -n | cut -d . -f 1`
-DOMAIN_NAME=`echo $PUPPET_SERVER | cut -d "." -f 2,3`
+DOMAIN_NAME=`echo $PUPPET_SERVER | cut -d "." -f 2-`
 IP=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | grep 'Bcast' | awk '{print $1}'`
 
 #Get OS Info
@@ -185,6 +185,12 @@ Syntax
 -P: postgresql password for puppetdb user
 -H: puppet server hostname | mcollective sever hostname (for client setup)
 -h: show help
+
+Examples:
+Install puppet server with all defaults:
+`basename $script` -s
+Install puppet client:
+`basename $script` -c -H {puppet_server_hostname}
 
 USAGE
 exit 1
@@ -571,17 +577,17 @@ fi #puppet server setup end
 
 #AGENT SETUP
 if [ "$PC_SETUP" == "1" ]; then
-  # if [ -z "${PS_MC_HN}" ]; then
-  #   echo -e "enter the hostname of puppet_server: \c"
-  #   read PS_MC_HN
-  # fi
-  # ping -c1 -w1 ${PS_MC_HN} &>/dev/null
-  # if [ $? -eq 0 ]; then
-  #   echo ${PS_MC_HN} is up ...
-  # else
-  #   printclr "${PS_MC_HN} is down!, Aborting."
-  #   exit 1
-  # fi
+  if [ -z "${PS_MC_HN}" ]; then
+    echo -e "enter the hostname of puppet_server: \c"
+    read PS_MC_HN
+  fi
+  ping -c1 -w1 ${PS_MC_HN} &>/dev/null
+  if [ $? -eq 0 ]; then
+    echo ${PS_MC_HN} is up ...
+  else
+    printclr "${PS_MC_HN} is down!, Aborting."
+    exit 1
+  fi
   printclr "Installing Puppet client"
   if [ "$OS" == "CentOS" ] || [ "$OS" == "RedHat" ]; then
     ${INSTALL} clean all
