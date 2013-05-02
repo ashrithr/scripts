@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ===
-# Script to handle puppet server and client setup with puppetdb
+# Script to handle puppet server and client setup with puppetdb, sed
 #
 # Description:
 #   * Installs puppet server
@@ -16,7 +16,7 @@
 #   * see usage
 #
 # Author: Ashrith
-# Version: 1.0
+# Version: 1.5
 # ===
 
 #Variables
@@ -121,7 +121,7 @@ function install_puppet_repo () {
 
 function disable_gpgcheck () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
-    local files="epel.repo puppetlabs.repo epel-testing.repo cloudera-cdh4.repo"
+    local files="epel.repo puppetlabs.repo epel-testing.repo"
     for f in ${files}; do
       sed -i 's/gpgcheck=1/gpgcheck=0/' /etc/yum.repos.d/${f}
     done
@@ -164,7 +164,7 @@ local all all trust
 host all all 127.0.0.1/32 trust
 host all all ::1/128 trust
 PSQLDELIM
-  echo "listen_addresses = '0.0.0.0'" >> ${PSQL_DATA_CONF}
+  echo "listen_addresses = '0.0.0.0'" >> ${PSQL_CONFIG}
   printclr "[Debug]: Setting up postgresql for puppetdb and hsmp"
   service postgresql restart #restart postgresql to take effects
   psql -U postgres -d template1 << END
@@ -606,4 +606,6 @@ sed -e s,PUPPETSERVER_PH,${PS_MC_HN},g -i /etc/puppet/puppet.conf
 
 #printclr "Setting up cron job to start puppet agent"
 #puppet resource cron puppet-agent ensure=present user=root minute=30 command='/usr/bin/puppet agent --onetime --no-daemonize --splay'
+
+printclr "Done Installing/Configurig Puppet"
 fi  #end agent setup
