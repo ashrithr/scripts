@@ -87,9 +87,13 @@ function install_epel_repo () {
 
 function install_puppet_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
-    echo "[DEBUG]: installing puppetlabs repo"
-    [ ! -f /etc/yum.repos.d/puppetlabs.repo ] && rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
-    [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
+    if [ -f /etc/yum.repos.d/puppetlabs.repo ]; then
+      echo "[DEBUG]: puppetlabs repo already exists, using existing puppetlabs repo"
+    else
+      echo "[DEBUG]: installing puppetlabs repo"
+      rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
+      [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
+    fi
   elif [[ ${OS} =~ ubuntu ]]; then
     echo "[DEBUG]: installing puppetlabs repo"
     wget -q http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb &> /dev/null
