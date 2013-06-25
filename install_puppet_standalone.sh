@@ -71,12 +71,12 @@ function install_epel_repo () {
     else
       if [ $VER = "6" ]; then
         echo "[DEBUG]: Installing epel 6 repo"
-        rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/`arch`/epel-release-6-8.noarch.rpm &> /dev/null
+        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/`arch`/epel-release-6-8.noarch.rpm &> /dev/null
         [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
       elif [ $VER = "5"]; then
         echo "[DEBUG]: installing epel 5 repo"
-        rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/`arch`/epel-release-5-4.noarch.rpm &> /dev/null
-  [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
+        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/`arch`/epel-release-5-4.noarch.rpm &> /dev/null
+        [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
       fi
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
@@ -88,7 +88,7 @@ function install_epel_repo () {
 function install_puppet_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     echo "[DEBUG]: installing puppetlabs repo"
-    rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
+    [ ! -f /etc/yum.repos.d/puppetlabs.repo ] && rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
     [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
   elif [[ ${OS} =~ ubuntu ]]; then
     echo "[DEBUG]: installing puppetlabs repo"
