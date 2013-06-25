@@ -108,4 +108,4 @@ install_epel_repo
 install_puppet_repo
 echo "Installing puppet"
 ${INSTALL} -y install puppet > /dev/null
-[ $? -ne 0 ] && { echo "Failed installing puppet package"; exit 1; }
+[ $? -ne 0 ] && { echo "Failed installing puppet package"; exit 1; } || echo "Sucessfully installed puppet"
