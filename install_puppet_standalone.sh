@@ -108,4 +108,4 @@ ret=$(install_puppet_repo)
 [ $ret -ne 0 ] || { echo "Failed installing puppet repo"; exit 1 }
 echo "Installing puppet"
 ${INSTALL} -y install puppet > /dev/null
-[ ret -ne 0 ] || { echo "Failed installing puppet package"; exit 1 }
+[ $ret -ne 0 ] || { echo "Failed installing puppet package"; exit 1 }
