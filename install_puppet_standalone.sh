@@ -49,8 +49,6 @@ elif [ "${OS}" == "Darwin" ]; then
   }
 fi
  
-echo $OSSTR
- 
 #Validate OS
  
 if [[ $OSSTR =~ centos || $OSSTR =~ redhat ]]; then
@@ -73,31 +71,41 @@ function install_epel_repo () {
     else
       if [ $VER = "6" ]; then
         echo "[DEBUG]: Installing epel 6 repo"
-        rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/`arch`/epel-release-6-8.noarch.rpm
+        rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/`arch`/epel-release-6-8.noarch.rpm &> /dev/null
+        RET=$?
       elif [ $VER = "5"]; then
         echo "[DEBUG]: installing epel 5 repo"
-        rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/`arch`/epel-release-5-4.noarch.rpm
+        rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/`arch`/epel-release-5-4.noarch.rpm &> /dev/null
+        RET=$?
       fi
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
     echo "[DEBUG]: Performing ${INSTALL} update to refresh the repos"
-    ${INSTALL} update
+    ${INSTALL} update &> /dev/null
+    RET=$?
   fi
+  echo $RET
 }
  
 function install_puppet_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     echo "[DEBUG]: installing puppetlabs repo"
-    rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm
+    rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
+    RET=$?
   elif [[ ${OS} =~ ubuntu ]]; then
     echo "[DEBUG]: installing puppetlabs repo"
-    wget http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb
+    wget -q http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb &> /dev/null
+    RET=$?
   else
     echo "[Fatal] Unknown OS. This script does not yet support the ${OS}, Aborting!"
     exit 2
   fi
+  echo $?
 }
  
 install_epel_repo
-install_puppet_repo
-${INSTALL} -y install puppet
+ret=$(install_puppet_repo)
+[ $ret -ne 0 ] || { echo "Failed installing puppet repo"; exit 1 }
+echo "Installing puppet"
+${INSTALL} -y install puppet > /dev/null
+[ ret -ne 0 ] || { echo "Failed installing puppet package"; exit 1 }
