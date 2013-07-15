@@ -1,7 +1,7 @@
 scripts
 =======
 
-###aws-cmdline 
+###aws-cmdline
 
 command line client application to amazon's elastic compute cloud (ec2).
 
@@ -60,6 +60,12 @@ Tested and working in CentOS 6.2/Ubuntu 12.04
 
 script to install chef server/agent on centos and ubuntu
 
+**Sample Usage:**
+
+```
+To install server:
+wget -qO - https://raw.github.com/ashrithr/scripts/master/chef_installer.sh | bash /dev/stdin -s
+```
 
 ###random-generator
 

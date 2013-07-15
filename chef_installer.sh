@@ -127,7 +127,7 @@ function install_chef_service () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     curl https://opscode-omnitruck-release.s3.amazonaws.com/el/6/x86_64/chef-server-11.0.6-1.el6.x86_64.rpm -o \
          /root/chef-server-11.0.6-1.el6.x86_64.rpm
-    yum localinstall chef-server-11.0.6-1.el6.x86_64.rpm
+    yum -y localinstall chef-server-11.0.6-1.el6.x86_64.rpm
     chef-server-ctl reconfigure
     mkdir -p ~/.chef
     sudo cp /etc/chef-server/chef-validatior.pem /etc/chef-server/chef-webui.pem ~/.chef
