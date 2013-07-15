@@ -73,7 +73,7 @@ function install_epel_repo () {
 }
 
 function preq () {
-  preq_commands="wget curl vim"
+  preq_commands="curl"
   for cmd in $preq_commands; do
     command -v $cmd >/dev/null 2>&1 || {
       echo >&2 "I require $cmd but it's not installed. Installing $cmd ...";
@@ -117,6 +117,7 @@ EOF
 }
 
 function install_chef_client () {
+  # can install both client and workstation
   curl -L https://www.opscode.com/chef/install.sh | bash
 }
 
@@ -130,9 +131,19 @@ function install_chef_service () {
     yum -y localinstall chef-server-11.0.6-1.el6.x86_64.rpm
     chef-server-ctl reconfigure
     mkdir -p ~/.chef
-    sudo cp /etc/chef-server/chef-validatior.pem /etc/chef-server/chef-webui.pem ~/.chef
-    sudo chown -R $USER ~/.chef
-
+    cp /etc/chef-server/chef-validator.pem /etc/chef-server/chef-webui.pem ~/.chef
+    chown -R $USER ~/.chef
+    echo 'export PATH="/opt/chef-server/embedded/bin:$PATH"' >> ~/.bash_profile && source ~/.bash_profile
+    cat > ~/.chef/knife.rb <<EOF
+log_level                :info
+log_location             STDOUT
+node_name                'root'
+client_key               '/root/.chef/root.pem'
+validation_client_name   'chef-validator'
+validation_key           '/root/.chef/chef-validator.pem'
+chef_server_url          'https://`hostname --fqdn`'
+syntax_check_cache_path  '/root/.chef/syntax_check_cache'
+EOF
   elif [[ ${OS} =~ ubuntu ]]; then
     [ ${WEBUI_PASSWORD} ] || WEBUI_PASSWORD='secret123'
     [ ${MSQ_QUEUE_PASSWORD} ] || MSQ_QUEUE_PASSWORD='secret123'
@@ -161,16 +172,6 @@ EOF
   fi
 }
 
-function disable_gpgcheck () {
-  if [[ $OS =~ centos || $OS =~ redhat ]]; then
-    local files="epel.repo epel-testing.repo"
-    for f in ${files}; do
-      sed -i 's/gpgcheck=1/gpgcheck=0/' /etc/yum.repos.d/${f}
-    done
-    yum clean all &> /dev/null
-  fi
-}
-
 function stop_iptables () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     printclr "Stopping IPTables and Disabling SELinux"
@@ -196,8 +197,8 @@ Syntax
 
 -s: Chef server setup
 -c: Chef client setup
+-w: Chef workstation setup
 -J: JVM Heap Size for solr
--P: postgresql password for puppetdb user
 -H: chef server hostname (for client setup)
 -h: show help
 
@@ -217,12 +218,6 @@ exit 1
 
 trap "quit 3" SIGINT SIGQUIT SIGTSTP
 
-#only root can run this script
-if [ "$(id -u)" != "0" ]; then
-   echo "This script must be run as root"
-   exit 1
-fi
-
 #check number of arguments
 if [ $# -eq 0 ];
 then
@@ -231,7 +226,7 @@ then
 fi
 
 #parse command line options
-while getopts j:M:S:E:H:schmd opts
+while getopts j:M:S:E:H:schw opts
 do
   case $opts in
     s)
@@ -243,6 +238,8 @@ do
     c)
     CC_SETUP=1
       ;;
+    w)
+    WS_SETUP=1
     J)
     JVM_SIZE=${OPTARG}
       ;;
@@ -261,13 +258,38 @@ then
   JVM_SIZE="-Xmx192m"
 fi
 
-preq
-install_epel_repo
-install_chef_repo
-disable_gpgcheck
-stop_iptables
 if [ $CS_SETUP -eq 1 ]; then
+  if [ "$(id -u)" != "0" ]; then
+   echo "This script must be run as root"
+   exit 1
+  fi
+  preq
+  install_epel_repo
+  install_chef_repo
+  stop_iptables
   install_chef_service
+  if [ $? -eq 0 ]; then
+    cat <<EOF
+    Sucessfully installed chef-server
+    Now you can bootstrap new nodes (which includes installing chef client) by using:
+    * If using private key:
+      - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME
+    * If using password:
+      - knife bootstrap FQDN_OR_IP -x USERNAME -P PASSWORD
+    * If sudo is required:
+      - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME --sudo
+EOF
 elif [ $CC_SETUP -eq 1 ]; then
+  preq
   install_chef_client
+elif [ $WS_SETUP -eq 1 ]; then
+  preq
+  install_chef_client
+  cat <<EOF
+  Get the following files to .chef dir:
+  * For Hosted Chef: download knife.rb, ORGANIZATION-validator.pem USER.pem
+  * For OpenSource Chef:
+    - Create knife.rb usig `knife configure --initial`
+    - Copy `chef-validator.pem` on the open source chef server (located at /etc/chef-server)
+EOF
 fi
