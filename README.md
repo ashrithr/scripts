@@ -56,6 +56,10 @@ Allows user to install:
 
 Tested and working in CentOS 6.2/Ubuntu 12.04
 
+###chef-installer
+
+script to install chef server/agent on centos and ubuntu
+
 
 ###random-generator
 
