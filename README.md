@@ -63,8 +63,11 @@ script to install chef server/agent on centos and ubuntu
 **Sample Usage:**
 
 ```
-To install server:
+To install chef server:
 wget -qO - https://raw.github.com/ashrithr/scripts/master/chef_installer.sh | bash /dev/stdin -s
+
+To install chef client:
+
 ```
 
 ###random-generator

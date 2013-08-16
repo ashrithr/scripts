@@ -52,13 +52,13 @@ fi
 #Validate OS
 
 if [[ $OSSTR =~ centos || $OSSTR =~ redhat ]]; then
-  echo "[Debug]: RedHat based system detected"
+  echo "[*]  RedHat based system detected"
   INSTALL="yum"
 elif [[ $OSSTR =~ ubuntu ]]; then
-  echo "[Debug]: Debian based system detected"
+  echo "[*] Debian based system detected"
   INSTALL="apt-get"
 elif [[ $OSSTR =~ MacOSX ]]; then
-  echo "[Debug]: Mac based system detected"
+  echo "[*] Mac based system detected"
 else
   echo "[Error]: ${OS} is not supported"
   exit 1
@@ -67,20 +67,20 @@ fi
 function install_epel_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     if [ -f /etc/yum.repos.d/epel.repo ]; then
-      echo "[DEBUG]: epel repo already exists, uisng existing epel repo"
+      echo "[*]  epel repo already exists, uisng existing epel repo"
     else
       if [ $VER = "6" ]; then
-        echo "[DEBUG]: Installing epel 6 repo"
+        echo "[*]  Installing epel 6 repo"
         [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/`arch`/epel-release-6-8.noarch.rpm &> /dev/null
         [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
       elif [ $VER = "5"]; then
-        echo "[DEBUG]: installing epel 5 repo"
+        echo "[*]  installing epel 5 repo"
         [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/`arch`/epel-release-5-4.noarch.rpm &> /dev/null
         [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
       fi
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
-    echo "[DEBUG]: Performing ${INSTALL} update to refresh the repos"
+    echo "[*]  Performing ${INSTALL} update to refresh the repos"
     ${INSTALL} update &> /dev/null
   fi
 }
@@ -88,14 +88,14 @@ function install_epel_repo () {
 function install_puppet_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
     if [ -f /etc/yum.repos.d/puppetlabs.repo ]; then
-      echo "[DEBUG]: puppetlabs repo already exists, using existing puppetlabs repo"
+      echo "[*]  puppetlabs repo already exists, using existing puppetlabs repo"
     else
-      echo "[DEBUG]: installing puppetlabs repo"
+      echo "[*]  installing puppetlabs repo"
       rpm -ivh http://yum.puppetlabs.com/el/6/products/`arch`/puppetlabs-release-6-5.noarch.rpm &> /dev/null
       [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
-    echo "[DEBUG]: installing puppetlabs repo"
+    echo "[*]  installing puppetlabs repo"
     wget -q http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb &> /dev/null
     [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
   else
@@ -106,6 +106,6 @@ function install_puppet_repo () {
 
 install_epel_repo
 install_puppet_repo
-echo "Installing puppet"
-${INSTALL} -y install puppet > /dev/null
-[ $? -ne 0 ] && { echo "Failed installing puppet package"; exit 1; } || echo "Sucessfully installed puppet"
+echo "[*]  Installing puppet"
+${INSTALL} -y install puppet &> /dev/null
+[ $? -ne 0 ] && { echo "Failed installing puppet package"; exit 1; } || echo "[*]  Sucessfully installed puppet"
