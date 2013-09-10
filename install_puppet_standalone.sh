@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
 # -
-# Script to install standalone puppet
+# Script to install puppet in standalone mode
 # -
 
 OS=`uname -s`
 REV=`uname -r`
 MACH=`uname -m`
+LOG="/tmp/puppet_install.log"
 
 GetVersionFromFile()
 {
@@ -59,6 +60,7 @@ elif [[ $OSSTR =~ ubuntu ]]; then
   INSTALL="apt-get"
 elif [[ $OSSTR =~ MacOSX ]]; then
   echo "[*] Mac based system detected"
+  INSTALL="brew"
 else
   echo "[Error]: ${OS} is not supported"
   exit 1
@@ -71,12 +73,12 @@ function install_epel_repo () {
     else
       if [ $VER = "6" ]; then
         echo "[*]  Installing epel 6 repo"
-        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/${ARCH}/epel-release-6-8.noarch.rpm &> /dev/null
+        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/6/${ARCH}/epel-release-6-8.noarch.rpm > ${LOG} 2>&1
         [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
       elif [ $VER = "5"]; then
         echo "[*]  installing epel 5 repo"
-        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/${ARCH}/epel-release-5-4.noarch.rpm &> /dev/null
-        [ $? -ne 0 ] && { echo "Failed installing epel repo"; }
+        [ ! -f /etc/yum.repos.d/epel.repo ] && rpm -ivh http://linux.mirrors.es.net/fedora-epel/5/${ARCH}/epel-release-5-4.noarch.rpm > ${LOG} 2>&1
+        [ $? -ne 0 ] && { echo "Failed installing epel repo, error logged at: ${LOG}"; }
       fi
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
@@ -90,14 +92,14 @@ function install_puppet_repo () {
     if [ -f /etc/yum.repos.d/puppetlabs.repo ]; then
       echo "[*]  puppetlabs repo already exists, using existing puppetlabs repo"
     else
-      echo "[*]  installing puppetlabs repo"
-      rpm -ivh http://yum.puppetlabs.com/el/6/products/${ARCH}/puppetlabs-release-6-5.noarch.rpm &> /dev/null
-      [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
+      echo "[*]  Installing puppetlabs repo"
+      rpm -ivh http://yum.puppetlabs.com/el/6/products/${ARCH}/puppetlabs-release-6-5.noarch.rpm > ${LOG} 2>&1
+      [ $? -ne 0 ] && { echo "Failed installing puppet repo, error logged at: ${LOG}"; exit 1; }
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
     echo "[*]  installing puppetlabs repo"
-    wget -q http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb &> /dev/null
-    [ $? -ne 0 ] && { echo "Failed installing puppet repo"; exit 1; }
+    wget -q http://apt.puppetlabs.com/puppetlabs-release-precise.deb && dpkg -i puppetlabs-release-precise.deb > ${LOG} 2>&1
+    [ $? -ne 0 ] && { echo "Failed installing puppet repo, error logged at: ${LOG}"; exit 1; }
   else
     echo "[Fatal] Unknown OS. This script does not yet support the ${OS}, Aborting!"
     exit 2
@@ -107,5 +109,5 @@ function install_puppet_repo () {
 install_epel_repo
 install_puppet_repo
 echo "[*]  Installing puppet"
-${INSTALL} -y install puppet &> /dev/null
-[ $? -ne 0 ] && { echo "Failed installing puppet package"; exit 1; } || echo "[*]  Sucessfully installed puppet"
+${INSTALL} -y install puppet > ${LOG} 2>&1
+[ $? -ne 0 ] && { echo "Failed installing puppet package, error logged at: ${LOG}"; exit 1; } || echo "[*]  Sucessfully installed puppet"
