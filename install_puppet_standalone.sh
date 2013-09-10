@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
-# -
+# ---
 # Script to install puppet in standalone mode
-# -
+# Supported OS: RedHat, Debian, Darwin
+# @author ashrith
+# ---
 
 OS=`uname -s`
 REV=`uname -r`
@@ -58,13 +60,30 @@ if [[ $OSSTR =~ centos || $OSSTR =~ redhat ]]; then
 elif [[ $OSSTR =~ ubuntu ]]; then
   echo "[*] Debian based system detected"
   INSTALL="apt-get"
-elif [[ $OSSTR =~ MacOSX ]]; then
+elif [[ $OSSTR =~ Darwin ]]; then
   echo "[*] Mac based system detected"
-  INSTALL="brew"
 else
   echo "[Error]: ${OS} is not supported"
   exit 1
 fi
+
+function yesno () {
+  while :
+  do
+    echo -e "$* (Y/N)? \c"
+
+    read yn junk
+
+    case $yn in
+        y|Y|yes|Yes|YES)
+          return 0;;
+        n|N|no|No|NO)
+          return 1;;
+        *)
+          echo Please answer Yes or No.;;
+    esac
+  done
+}
 
 function install_epel_repo () {
   if [[ $OS =~ centos || $OS =~ redhat ]]; then
@@ -106,8 +125,101 @@ function install_puppet_repo () {
   fi
 }
 
-install_epel_repo
-install_puppet_repo
-echo "[*]  Installing puppet"
-${INSTALL} -y install puppet > ${LOG} 2>&1
-[ $? -ne 0 ] && { echo "Failed installing puppet package, error logged at: ${LOG}"; exit 1; } || echo "[*]  Sucessfully installed puppet"
+function install_puppet_mac () {
+  facter_version=$1
+  puppet_version=$2
+  target_volume=$3
+
+  start_date=$(date "+%Y-%m-%d%:%H:%M:%S")
+  mkdir /private/tmp/$start_date && cd /private/tmp/$start_date
+
+  curl -O http://downloads.puppetlabs.com/mac/facter-$facter_version.dmg
+  curl -O http://downloads.puppetlabs.com/mac/puppet-$puppet_version.dmg
+
+  hdiutil attach facter-$facter_version.dmg
+  hdiutil attach puppet-$puppet_version.dmg
+
+  sudo installer -package /Volumes/facter-$facter_version/facter-$facter_version.pkg -target "$target_volume"
+  sudo installer -package /Volumes/puppet-$puppet_version/puppet-$puppet_version.pkg -target "$target_volume"
+  
+  echo "Creating directories in /var and /etc - needs sudo"
+  sudo mkdir -p /var/lib/puppet
+  sudo mkdir -p /etc/puppet/manifests
+  sudo mkdir -p /etc/puppet/ssl
+
+  if [ $(dscl . -list /Groups | grep puppet | wc -l)  = 0 ]; then
+    echo "Creating a puppet group - needs sudo"
+    max_gid=$(dscl . -list /Groups gid | awk '{print $2}' | sort -ug | tail -1) 
+    new_gid=$((max_gid+1))
+    sudo dscl . create /Groups/puppet
+    sudo dscl . create /Groups/puppet gid $new_gid
+  fi
+ 
+ 
+  if [ $(dscl . -list /Users | grep puppet | wc -l)  = 0 ]; then
+    echo "Creating a puppet user - needs sudo"
+    max_uid=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -ug | tail -1)
+    new_uid=$((max_uid+1))
+    sudo dscl . create /Users/puppet
+    sudo dscl . create /Users/puppet UniqueID $new_uid
+    sudo dscl . -create /Users/puppet PrimaryGroupID $new_gid
+  fi
+ 
+  echo "Creating /etc/puppet/puppet.conf - needs sudo"
+ 
+sudo sh -c "echo \"[main]
+pluginsync = false
+server = `hostname`
+ 
+[master]
+vardir = /var/lib/puppet
+libdir = $vardir/lib
+ssldir = /etc/puppet/ssl
+certname = `hostname`
+ 
+[agent]
+vardir = /var/lib/puppet
+libdir = $vardir/lib
+ssldir = /etc/puppet/ssl
+certname = `hostname`
+\" > /etc/puppet/puppet.conf"
+ 
+  echo "Changing permissions - needs sudo"
+   
+  sudo chown -R puppet:puppet  /var/lib/puppet
+  sudo chown -R puppet:puppet  /etc/puppet
+   
+  echo "Cleaning up"
+   
+  hdiutil detach /Volumes/facter-$facter_version
+  hdiutil detach /Volumes/puppet-$puppet_version
+   
+  cd /private/tmp
+  rm -rf ./$start_date  
+}
+
+if [[ $OS =~ centos || $OS =~ redhat || ${OS} =~ ubuntu ]]; then
+  install_epel_repo
+  install_puppet_repo
+  echo "[*]  Installing puppet"
+  ${INSTALL} -y install puppet > ${LOG} 2>&1
+  [ $? -ne 0 ] && { echo "Failed installing puppet package, error logged at: ${LOG}"; exit 1; } || echo "[*]  Sucessfully installed puppet"
+elif [[ $OSSTR =~ Darwin  ]]; then
+  if [ $# -ne 3 ]; then
+    MAC_FACTER_VER=$1
+    MAC_PUPPET_VER=$2
+    MAC_DEFAULT_VOL=$3
+  else
+    echo "[*] No values specified for puppet & facter using latest pacakges"
+    MAC_FACTER_VER="1.7.3"
+    MAC_PUPPET_VER="3.2.4"
+    MAC_DEFAULT_VOL="/Volumes/Macintosh\ HD/"
+  fi
+  echo "About to install Facter ${MAC_FACTER_VER} and Puppet ${MAC_PUPPET_VER} on target volume ${MAC_DEFAULT_VOL}"
+  if yesno Do you really wish to quit now; then
+    install_puppet_mac $MAC_FACTER_VER $MAC_PUPPET_VER $MAC_DEFAULT_VOL
+  else
+    echo "Exiting"
+    exit 0
+  fi
+fi
