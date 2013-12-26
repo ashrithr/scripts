@@ -4,11 +4,11 @@
 # Script to handle installation of chef server and client setup
 #
 # Description:
-#  * Desc goes here
-#   Supported Platforms: Redhat/CentOS/Ubuntu
+#  Installs chef server, chef client or chef workstation
+#  Supported Platforms: Redhat/CentOS/Ubuntu
 #
 # Author: Ashrith
-# Version: 0.1
+# Version: 0.2
 # ===
 
 #Variables
@@ -67,8 +67,8 @@ function install_epel_repo () {
       fi
     fi
   elif [[ ${OS} =~ ubuntu ]]; then
-    logit "[DEBUG]: Performing ${INSTALL} update to refresh the repos"
-    ${INSTALL} update
+    logit "[DEBUG]: Performing apt-get update to refresh the repos"
+    apt-get update
   fi
 }
 
@@ -117,8 +117,16 @@ EOF
 }
 
 function install_chef_client () {
+  CHEF_SERVER=$1
   # can install both client and workstation
   curl -L https://www.opscode.com/chef/install.sh | bash
+  mkdir -p /etc/chef
+  cat > /etc/chef/client.rb <<EOF
+log_level        :info
+log_location     STDOUT
+chef_server_url  'https://${CHEF_SERVER}'
+validation_client_name 'chef-validator'
+EOF
 }
 
 #PARMS: chef_server_webui_password
@@ -130,20 +138,20 @@ function install_chef_service () {
          /root/chef-server-11.0.6-1.el6.x86_64.rpm
     yum -y localinstall chef-server-11.0.6-1.el6.x86_64.rpm
     chef-server-ctl reconfigure
-    mkdir -p ~/.chef
-    cp /etc/chef-server/chef-validator.pem /etc/chef-server/chef-webui.pem ~/.chef
-    chown -R $USER ~/.chef
+    mkdir -p ${HOME}/.chef
+    cp /etc/chef-server/chef-validator.pem /etc/chef-server/chef-webui.pem ${HOME}/.chef
+    chown -R $USER ${HOME}/.chef
     echo 'export PATH="/opt/chef-server/embedded/bin:$PATH"' >> ~/.bash_profile && source ~/.bash_profile
-    cat > ~/.chef/knife.rb <<EOF
-log_level                :info
-log_location             STDOUT
-node_name                'root'
-client_key               '/root/.chef/root.pem'
-validation_client_name   'chef-validator'
-validation_key           '/root/.chef/chef-validator.pem'
-chef_server_url          'https://`hostname --fqdn`'
-syntax_check_cache_path  '/root/.chef/syntax_check_cache'
-EOF
+#     cat > ~/.chef/knife.rb <<EOF
+# log_level                :info
+# log_location             STDOUT
+# node_name                '$USER'
+# client_key               '$HOME/.chef/${USER}.pem'
+# validation_client_name   'chef-validator'
+# validation_key           '$HOME/.chef/chef-validator.pem'
+# chef_server_url          'https://`hostname --fqdn`'
+# syntax_check_cache_path  '$HOME/.chef/syntax_check_cache'
+# EOF
   elif [[ ${OS} =~ ubuntu ]]; then
     [ ${WEBUI_PASSWORD} ] || WEBUI_PASSWORD='secret123'
     [ ${MSQ_QUEUE_PASSWORD} ] || MSQ_QUEUE_PASSWORD='secret123'
@@ -151,23 +159,24 @@ EOF
     sudo debconf-set-selections <<< "chef-server-webui chef-server-webui/admin_password password ${WEBUI_PASSWORD}"
     sudo debconf-set-selections <<< "chef-solr chef-solr/amqp_password password ${MSQ_QUEUE_PASSWORD}"
     sudo apt-get install -y opscode-keyring chef chef-server
+    # sudo chef-server-ctl reconfigure
     #Configure command line tool
-    mkdir -p ~/.chef
-    sudo cp /etc/chef/validation.pem /etc/chef/webui.pem ~/.chef
-    sudo chown -R $USER ~/.chef
-    cat > ~/.chef/knife.rb <<EOF
-log_level                :info
-log_location             STDOUT
-node_name                'ubuntu'
-client_key               '/home/ubuntu/.chef/ubuntu.pem'
-validation_client_name   'chef-validator'
-validation_key           '/home/ubuntu/.chef/validation.pem'
-chef_server_url          'http://`hostname --fqdn`:4000'
-cache_type               'BasicFile'
-cache_options( :path => '/home/ubuntu/.chef/checksums' )
-EOF
+    mkdir -p $HOME/.chef
+    sudo cp /etc/chef/validation.pem /etc/chef/webui.pem $HOME/.chef
+    sudo chown -R $USER $HOME/.chef
+#     cat > ~/.chef/knife.rb <<EOF
+# log_level                :info
+# log_location             STDOUT
+# node_name                '$USER'
+# client_key               '$HOME/.chef/${USER}.pem'
+# validation_client_name   'chef-validator'
+# validation_key           '$HOME/.chef/chef-validator.pem'
+# chef_server_url          'http://`hostname --fqdn`:4000'
+# cache_type               'BasicFile'
+# cache_options( :path => '${HOME}/.chef/checksums' )
+# EOF
   #create client account
-  knife client create ashrith -d -a -f /tmp/ashrith.pem
+  # knife client create ashrith -d -a -f /tmp/ashrith.pem
   #knife client show chef-webui
   fi
 }
@@ -216,7 +225,7 @@ exit 1
 #Main Logic
 ############################
 
-trap "quit 3" SIGINT SIGQUIT SIGTSTP
+trap "exit 3" SIGINT SIGQUIT SIGTSTP
 
 #check number of arguments
 if [ $# -eq 0 ];
@@ -240,6 +249,7 @@ do
       ;;
     w)
     WS_SETUP=1
+      ;;
     J)
     JVM_SIZE=${OPTARG}
       ;;
@@ -258,7 +268,7 @@ then
   JVM_SIZE="-Xmx192m"
 fi
 
-if [ $CS_SETUP -eq 1 ]; then
+if [[ $CS_SETUP -eq 1 ]]; then
   if [ "$(id -u)" != "0" ]; then
    echo "This script must be run as root"
    exit 1
@@ -268,28 +278,36 @@ if [ $CS_SETUP -eq 1 ]; then
   install_chef_repo
   stop_iptables
   install_chef_service
-  if [ $? -eq 0 ]; then
-    cat <<EOF
-    Sucessfully installed chef-server
-    Now you can bootstrap new nodes (which includes installing chef client) by using:
-    * If using private key:
-      - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME
-    * If using password:
-      - knife bootstrap FQDN_OR_IP -x USERNAME -P PASSWORD
-    * If sudo is required:
-      - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME --sudo
-EOF
-elif [ $CC_SETUP -eq 1 ]; then
-  preq
-  install_chef_client
-elif [ $WS_SETUP -eq 1 ]; then
-  preq
-  install_chef_client
   cat <<EOF
-  Get the following files to .chef dir:
+
+Sucessfully installed chef-server
+Run 'knife configure --initial' to configure knife.
+Now you can bootstrap new nodes (which includes installing chef client) by using following commands:
+* If using private key for accessing the client:
+  - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME
+* If using password for accessing the client:
+  - knife bootstrap FQDN_OR_IP -x USERNAME -P PASSWORD
+* If sudo is required on the client machine:
+  - knife bootstrap FQDN_OR_IP -i PATH_TO_KEY -x USERNAME --sudo
+EOF
+elif [[ $CC_SETUP -eq 1 ]]; then
+  preq
+  install_chef_client $CS_HN
+  cat <<EOF
+  Copy the 'validation.pem' from server located at '/etc/chef-server/chef-validator.pem' to the client being 
+  configured to path '/etc/chef/validation.pem'.
+EOF
+elif [[ $WS_SETUP -eq 1 ]]; then
+  preq
+  install_chef_client $CS_HN
+  cat <<EOF
+  Get the following files to ${HOME}/.chef dir:
   * For Hosted Chef: download knife.rb, ORGANIZATION-validator.pem USER.pem
   * For OpenSource Chef:
-    - Create knife.rb usig `knife configure --initial`
-    - Copy `chef-validator.pem` on the open source chef server (located at /etc/chef-server)
+    - Create knife.rb usig 'knife configure --initial'
+    - Copy 'chef-validator.pem' on the open source chef server (located at /etc/chef-server) (or) to access as
+      specific user create  a client that will be used from the workstation to do so run the following command 
+      from server: 'knife client create my-username -d -a -f /tmp/key.pem' and then copy the generated key for 
+      the user on server to '${HOME}/.chef' dir on the workstation machine.
 EOF
 fi
