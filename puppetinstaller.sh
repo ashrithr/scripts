@@ -23,7 +23,7 @@
 CLR="\033[01;32m"
 CLR_RED="\033[1;31m"
 CLR_END="\033[0m"
-PUPPET_SERVER=`uname -n`
+PUPPET_SERVER=`hostname --fqdn`
 HOSTNAME=`uname -n | cut -d . -f 1`
 DOMAIN_NAME=`echo $PUPPET_SERVER | cut -d "." -f 2-`
 IP=`ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | grep 'Bcast' | awk '{print $1}'`
