@@ -556,7 +556,7 @@ DELIM
 echo "  storeconfigs = true
   storeconfigs_backend = puppetdb
   modulepath = \$confdir/environments/\$environment/modules:\$confdir/modules
-  manifest = \$confdir/environments/\$environment/site.pp" >> /etc/puppet/puppet.conf
+  manifest = \$confdir/environments/\$environment/site.pp:\$confdir/manifests/site.pp" >> /etc/puppet/puppet.conf
 
 #This will make PuppetDB the authoritative source for the inventory service.
 cat > /etc/puppet/routes.yaml <<\DELIM
