@@ -240,20 +240,46 @@ EOF
   fi
 }
 
+function stop_iptables () {
+  case "$os" in
+    centos|redhat)
+      print_info "Stopping ip tables..."
+      execute "service iptables stop"
+      ;;
+    ubuntu)
+      print_info "Disabling ufw..."
+      execute "ufw disable"
+      ;;
+    *)
+      print_error "$os is not supported yet."
+      exit 1
+      ;;
+  esac
+}
+
+function stop_selinux () {
+  if [[ -f /etc/selinux/config ]]; then
+    print_info "Disabling selinux..."
+    execute "/usr/sbin/setenforce 0"
+    execute "sed -i.old s/SELINUX=enforcing/SELINUX=disabled/ /etc/selinux/config"
+  fi
+}
+
 function check_if_dse_is_installed () {
   print_info "Checking to see if dse is installed..."
   case "$os" in
     centos|redhat)
       execute "rpm -q dse-full"
       return $?
-    ;;
+      ;;
     ubuntu)
       execute "dpkg --list | grep dse-full"
       return $?
-    ;;
+      ;;
     *)
       print_error "$os is not supported yet."
-    exit 1
+      exit 1
+      ;;
   esac
 }
 
@@ -548,6 +574,8 @@ function main () {
   local start_time="$(date +%s)"
   get_system_info
   check_preqs
+  stop_iptables
+  stop_selinux
   install_jdk
   configure_jdk
   install_dse
