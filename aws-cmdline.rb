@@ -4,9 +4,17 @@
 # => AWS EC2/S3 Command Line Interface
 # => Author: Ashrith
 #
-# TODO: [s3 upload] handle directory uploads and wild char(s) in src_path
-#       [s3 downloads]
-# DONE: updated to work woth 1.8 as well
+# Features:
+# Allows user to
+# - create/list/delete instances (virtual machines)
+# - create/associate/disassociate/release elastic ips to instances
+# - create/list/delete spot requests
+# - start/stop/reboot/terminate instnaces
+# - view spot request price history
+# - S3 interface to create/list/delete buckets
+#   - upload files to buckets
+#   - download file from buckets
+#   - list bucket contents
 # ===
 
 begin

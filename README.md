@@ -1,82 +1,12 @@
 scripts
 =======
 
-###aws-cmdline
-
-command line client application to amazon's elastic compute cloud (ec2).
-
-`Features:`
-
-Allows user to
-
-- create/list/delete instances (virtual machines)
-- create/associate/disassociate/release elastic ips to instances
-- create/list/delete spot requests
-- start/stop/reboot/terminate instnaces
-- view spot request price history
-- S3 interface to create/list/delete buckets
-  - upload files to buckets
-  - download file from buckets
-  - list bucket contents
-
-`Usage: ./aws-cmdline help`
-
-Tested and working in Ruby 1.8 & 1.9
-
-###rsc
-
-command line client application for rackspace's openstack cloud
-
-`Features:`
-
-Allows user to
-
-- create/list/destroy virtual machines
-- list available images/instance flavors
-- change root password for specified isntance
-- multi mode, where user can create multiple isnstances at a time
-
-`Usage: ./rsc -h`
-
-###puppet-installer
-
-Script to install puppet server/agent
-
-`Features:`
-
-Allows user to install:
-
-- puppet server
-- puppetdb for stored configuraitons
-- postgresql for backing puppetdb (dependecy)
-- fusion passenger to scale puppet server
-- puppet agent
-
-`Usage: ./puppetinstaller -h`
-
-Tested and working in CentOS 6.2/Ubuntu 12.04
-
-###chef-installer
-
-script to install chef server/agent on centos and ubuntu
-
-**Sample Usage:**
-
-```
-To install chef server:
-wget -qO - https://raw.github.com/ashrithr/scripts/master/chef_installer.sh | bash /dev/stdin -s
-
-To install chef client:
-
-```
-
-###random-generator
-
-experimental ruby program to generate radom data which can be used for analytics purposes.
-
-`Usage: ./random_generator`
-
-
-###foreman1.0
-
-Script to install foreman and all its dependencies.
+| Script | Description | Version | Compatability |
+| --- | --- | --- | --- |
+| aws-cmdline | command line client application to amazon's elastic compute cloud (ec2) | 0.1 | ruby 1.8 & 1.9 |
+| chef_installer | script to install chef server/agent on centos and ubuntu | 0.2 | CentOS, Redhat & Ubuntu |
+| dse_install | Script to install DSE Cassandra | 0.1 | CentOS, Redhat & Ubuntu |
+| puppet_installer | Script to install puppet server/agent | 1.6 | CentOS, Redhat & Ubuntu |
+| puppet_standalone | Script to install puppet in standalone mode | 0.1 | Redhat, Debina & Darwin |
+| random_generator | sample program to generate radom data which can be used for analytics purposes | 0.1 | ruby 1.9 |
+| rsc | command line client application for rackspace's openstack cloud | 0.1 | Linux |
