@@ -346,8 +346,11 @@ function configure_dse () {
 
   print_info "Configuring basic dse cassandra..."
   # force cassandra to use jdk installed by this script
-  sed -i '16i\JAVA_HOME=/opt/java' $cassandra_env
-  sed -i '17i\JAVA=$JAVA_HOME/bin/java' $cassandra_env
+  grep JAVA_HOME=/opt/java $cassandra_env
+  if [[ $? -ne 0 ]]; then
+    sed -i '16i\JAVA_HOME=/opt/java' $cassandra_env
+    sed -i '17i\JAVA=$JAVA_HOME/bin/java' $cassandra_env    
+  fi
   # confifure cassandra
   if [[ -n $cassandra_seeds ]]; then
     sed -i "s/          - seeds: \"127.0.0.1\"/          - seeds: \"$cassandra_seeds\"/g" $cassandra_config
@@ -398,8 +401,8 @@ function configure_dse_heap () {
   local cassandra_env="/etc/dse/cassandra/cassandra-env.sh"
 
   print_info "Configuring dse cassandra jvm heap size..."
-  sed -i "s/#MAX_HEAP_SIZE=\"4G\"/#MAX_HEAP_SIZE=\"${max_heap_size}\"/g" $cassandra_env
-  sed -i "s/#HEAP_NEWSIZE=\"800M\"/#HEAP_NEWSIZE=\"${heap_newsize}\"/g" $cassandra_env
+  sed -i "s/#MAX_HEAP_SIZE=\"4G\"/MAX_HEAP_SIZE=\"${max_heap_size}\"/g" $cassandra_env
+  sed -i "s/#HEAP_NEWSIZE=\"800M\"/HEAP_NEWSIZE=\"${heap_newsize}\"/g" $cassandra_env
 }
 
 function enable_solr () {
