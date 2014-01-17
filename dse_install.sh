@@ -364,7 +364,7 @@ function configure_dse () {
   grep --quiet JAVA_HOME=/opt/java $cassandra_env
   if [[ $? -ne 0 ]]; then
     execute "sed -i '16i\JAVA_HOME=/opt/java' $cassandra_env"
-    execute "sed -i '17i\JAVA=$JAVA_HOME/bin/java' $cassandra_env"
+    execute "sed -i '17i\JAVA=\$JAVA_HOME/bin/java' $cassandra_env"
   fi
   # confifure cassandra seed nodes
   if [[ -n $cassandra_seeds ]]; then
