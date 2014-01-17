@@ -2,7 +2,8 @@
 #
 # Author:: Ashrith Mekala (<ashrith@cloudwick.com>)
 # Description:: Script to install DSE Cassandra
-# Supported OS:: CentOS, Redhat, Ubuntu
+# Version:: 0.2
+# Supported OS:: Redhat/CentOS (5 & 6), Ubuntu (precise & lucid)
 #
 # Copyright 2013, Cloudwick, Inc.
 #
@@ -21,16 +22,30 @@
 ####
 ## Run-time Variables (you'll have to change these)
 ####
+# dse credentials
 datastax_user="ashrith_cloudwick.com"
 datastax_password="4hqE99BPwKNRNx0"
+
+# where cassandra stores data
+cassandra_data_dirs=( "/cassandra/data" )
+cassandra_commit_log_dir="/cassandra/commitlog"
+cassandra_saved_caches_dir="/cassandra/saved_caches"
+
+# name of the cluster
+cassandra_cluster_name="Test Cluster"
 
 ####
 ## Configuration Variables (change these, only if you know what you are doing)
 ####
+# dse version to install
 dse_version="3.1.4"
+
+# whether to enable debug mode, prints extra information
 debug="false"
 
-### !!! DONT CHANGE BEYOND THIS POINT. DOING SO MAY BREAK THE SCRIPT !!!
+#####
+## !!! DONT CHANGE BEYOND THIS POINT. DOING SO MAY BREAK THE SCRIPT !!!
+#####
 
 ####
 ## Global Variables (script-use only)
@@ -52,8 +67,8 @@ clr_cyan="\x1b[36m"
 clr_end="\x1b[0m"
 
 # log files
-stdout_log="/tmp/dse-install.stdout"
-stderr_log="/tmp/dse-install.stderr"
+stdout_log="/tmp/$(basename $0).stdout"
+stderr_log="/tmp/$(basename $0).stderr"
 
 ####
 ## Utilities (pretty printing, error reporting, etc.)
@@ -169,7 +184,7 @@ function check_preqs () {
   check_for_root
   print_info "Checking your system prerequisites..."
 
-  for command in git curl vim; do
+  for command in curl vim; do
     type -P $command &> /dev/null || {
       print_warning "Command $command not found"
       print_info "Attempting to install $command..."
@@ -326,13 +341,13 @@ function identify_instance () {
 
 function find_broadcast_address () {
   case "$(identify_instance)" in
-    aws )
+    aws)
       public_ip=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
       echo $public_ip
       ;;
-    openstack )
+    openstack)
       ;;
-    physical )
+    physical)
       ;;
     * )
       ;;
@@ -346,26 +361,49 @@ function configure_dse () {
 
   print_info "Configuring basic dse cassandra..."
   # force cassandra to use jdk installed by this script
-  grep JAVA_HOME=/opt/java $cassandra_env
+  grep --quiet JAVA_HOME=/opt/java $cassandra_env
   if [[ $? -ne 0 ]]; then
-    sed -i '16i\JAVA_HOME=/opt/java' $cassandra_env
-    sed -i '17i\JAVA=$JAVA_HOME/bin/java' $cassandra_env    
+    execute "sed -i '16i\JAVA_HOME=/opt/java' $cassandra_env"
+    execute "sed -i '17i\JAVA=$JAVA_HOME/bin/java' $cassandra_env"
   fi
-  # confifure cassandra
+  # confifure cassandra seed nodes
   if [[ -n $cassandra_seeds ]]; then
-    sed -i "s/          - seeds: \"127.0.0.1\"/          - seeds: \"$cassandra_seeds\"/g" $cassandra_config
+    execute "sed -i s/          - seeds:.*/          - seeds: \"$cassandra_seeds\"/g $cassandra_config"
   fi
-  sed -i 's/# num_tokens: 256/num_tokens: 256/g' $cassandra_config
-  sed -i "s/listen_address: localhost/listen_address: ${eth0_ip_address}/g" $cassandra_config
-  sed -i 's/rpc_address: localhost/rpc_address: 0.0.0.0/g' $cassandra_config  
+  # configure cassandra storage dirs
+  local storage_dirs_string="data_file_directories: \n"
+  local c=0
+  while [[ $c -lt ${#cassandra_data_dirs[@]} ]]; do
+    if [[ ! -d ${cassandra_data_dirs[$c]} ]]; then
+      mkdir -p ${cassandra_data_dirs[$c]}
+      chown cassandra:cassandra ${cassandra_data_dirs[$c]}
+    fi
+    storage_dirs_string+="  - ${cassandra_data_dirs[$c]}\n"
+    let c=c+1
+  done
+  if [[ ! -d ${cassandra_commit_log_dir} ]]; then
+    mkdir -p $cassandra_commit_log_dir
+    chown cassandra:cassandra $cassandra_commit_log_dir
+  fi
+  if [[ ! -d ${cassandra_saved_caches_dir} ]]; then
+    mkdir -p ${cassandra_saved_caches_dir}
+    chwon cassandra:cassandra $cassandra_saved_caches_dir
+  fi
+  execute "sed -i '/data_file_directories:.*/ {N; s|data_file_directories:.*/var/lib/cassandra/data|${storage_dirs_string}|g}' $cassandra_config"
+  execute "sed -i 's|commitlog_directory: /var/lib/cassandra/commitlog|commitlog_directory: ${cassandra_commit_log_dir}|g' $cassandra_config"
+  execute "sed -i 's|saved_caches_directory: /var/lib/cassandra/saved_caches|saved_caches_directory: ${cassandra_saved_caches_dir}|g' $cassandra_config"
+
+  execute "sed -i 's/# num_tokens: 256/num_tokens: 256/g' $cassandra_config"
+  execute "sed -i s/listen_address: localhost/listen_address: ${eth0_ip_address}/g $cassandra_config"
+  execute "sed -i 's/rpc_address: localhost/rpc_address: 0.0.0.0/g' $cassandra_config  "
   if [[ "$increase_defaults" = "true" ]]; then
     print_info "Bumping up the defaults and timeouts for finetuning cassandra"
-    sed -i 's/write_request_timeout_in_ms: 10000/write_request_timeout_in_ms: 100000/g' $cassandra_config
-    sed -i 's/read_request_timeout_in_ms: 10000/read_request_timeout_in_ms: 100000/g' $cassandra_config
-    sed -i 's/request_timeout_in_ms: 10000/request_timeout_in_ms: 100000/g' $cassandra_config
-    sed -i 's/concurrent_writes: 32/concurrent_writes: 64/g' $cassandra_config
-    sed -i 's/# commitlog_total_space_in_mb: 4096/commitlog_total_space_in_mb: 4096/g' $cassandra_config
-    sed -i 's/#memtable_flush_writers: 1/memtable_flush_writers: 4/g' $cassandra_config
+    execute "sed -i 's/write_request_timeout_in_ms:.*/write_request_timeout_in_ms: 100000/g' $cassandra_config"
+    execute "sed -i 's/read_request_timeout_in_ms:.*/read_request_timeout_in_ms: 100000/g' $cassandra_config"
+    execute "sed -i 's/request_timeout_in_ms:.*/request_timeout_in_ms: 100000/g' $cassandra_config"
+    execute "sed -i 's/concurrent_writes:.*/concurrent_writes: 64/g' $cassandra_config"
+    execute "sed -i 's/# commitlog_total_space_in_mb:.*/commitlog_total_space_in_mb: 4096/g' $cassandra_config"
+    execute "sed -i 's/#memtable_flush_writers:.*/memtable_flush_writers: 4/g' $cassandra_config"
   fi
 }
 
@@ -379,9 +417,9 @@ function configure_dse_dc () {
   local dse_dc_config="/etc/dse/cassandra/cassandra-rackdc.properties"
 
   print_info "Configuring dse datacenter replication..."
-  sed -i 's/delegated_snitch: com.datastax.bdp.snitch.DseSimpleSnitch/delegated_snitch: org.apache.cassandra.locator.GossipingPropertyFileSnitch/g' $dse_config
-  sed -i "s/dc=DC1/dc=${datacenter_name}/g" $dse_dc_config
-  sed -i "s/rack=RAC1/rack=${rack_name}/g" $dse_dc_config
+  execute "sed -i 's/delegated_snitch:.*/delegated_snitch: org.apache.cassandra.locator.GossipingPropertyFileSnitch/g' $dse_config"
+  execute "sed -i s/dc=.*/dc=${datacenter_name}/g $dse_dc_config"
+  execute "sed -i s/rack=.*/rack=${rack_name}/g $dse_dc_config"
 }
 
 function configure_dse_broadcast_address () {
@@ -392,7 +430,7 @@ function configure_dse_broadcast_address () {
   if [[ -z $broadcast_address ]]; then
     broadcast_address=$(find_broadcast_address)
   fi
-  sed -i "s/# broadcast_address: 1.2.3.4/broadcast_address: ${broadcast_address}/g" $cassandra_config
+  execute "sed -i s/# broadcast_address:.*/broadcast_address: ${broadcast_address}/g $cassandra_config"
 }
 
 function configure_dse_heap () {
@@ -401,16 +439,16 @@ function configure_dse_heap () {
   local cassandra_env="/etc/dse/cassandra/cassandra-env.sh"
 
   print_info "Configuring dse cassandra jvm heap size..."
-  sed -i "s/#MAX_HEAP_SIZE=\"4G\"/MAX_HEAP_SIZE=\"${max_heap_size}\"/g" $cassandra_env
-  sed -i "s/#HEAP_NEWSIZE=\"800M\"/HEAP_NEWSIZE=\"${heap_newsize}\"/g" $cassandra_env
+  execute "sed -i s/#MAX_HEAP_SIZE=.*/MAX_HEAP_SIZE=\"${max_heap_size}\"/g $cassandra_env"
+  execute "sed -i s/#HEAP_NEWSIZE=.*/HEAP_NEWSIZE=\"${heap_newsize}\"/g $cassandra_env"
 }
 
 function enable_solr () {
-  sed -i 's/SOLR_ENABLED=0/SOLR_ENABLED=1/g' /etc/default/dse
+  execute "sed -i 's/SOLR_ENABLED=0/SOLR_ENABLED=1/g' /etc/default/dse"
 }
 
 function enable_hadoop () {
-  sed -i 's/HADOOP_ENABLED=0/HADOOP_ENABLED=1/g' /etc/default/dse
+  execute "sed -i 's/HADOOP_ENABLED=0/HADOOP_ENABLED=1/g' /etc/default/dse"
 }
 
 function start_dse () {
@@ -472,6 +510,9 @@ Install dse cassandra on a single machine:
 
 Install dse on a cluster with seeds list:
 `basename $script` -S "s1.ex.com,s2.ex.com"
+
+Install dse on a cluster with seeds list, configure jvm heap sizes:
+`basename $script` -S "s1.ex.com,s2.ex.com" -j -J 8G -N 1G
 USAGE
   exit 1
 }
@@ -480,16 +521,32 @@ function check_variables () {
   print_info "Checking user-defined variables for any errors..."
 
   if [[ -z $datastax_user ]]; then
-    print_error "Variable datastax_user is required, please set this variable in the script"
+    print_error "Variable 'datastax_user' is required, set this variable in the script"
     exit 1
   fi
   if [[ -z $datastax_password ]]; then
-    print_error "Variable datastax_password is required, please set this variable in the script"
+    print_error "Variable 'datastax_password' is required, set this variable in the script"
     exit 1
   fi
   if [[ -z $dse_version ]]; then
-    print_error "Variable dse_version is required, please set this variable in the script"
+    print_error "Variable 'dse_version' is required, set this variable in the script"
     exit 1
+  fi
+  if [[ -z $cassandra_data_dirs ]]; then
+    print_error "Variable 'cassandra_data_dirs' is required, set this variable in the script to proceed"
+    exit 1
+  fi
+  if [[ -z $cassandra_commit_log_dir ]]; then
+    print_error "Variable 'cassandra_commit_log_dir' is required, set this variable in the script to proceed"
+    exit 1
+  fi
+  if [[ -z $cassandra_saved_caches_dir ]]; then
+    print_error "Variable 'cassandra_saved_caches_dir' is required, set this variable in the script to proceed"
+    exit 1
+  fi
+  if [[ -z $cassandra_cluster_name ]]; then
+    print_error "Variable 'cassandra_cluster_name' is required, set this variable in the script to proceed"
+    exit 1    
   fi
   if [[ -z $cassandra_seeds ]]; then
     print_warning "Cassandra seeds list is not passed, seeds list is required for deploying cassandra in distributed mode"
