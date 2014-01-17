@@ -387,7 +387,7 @@ function configure_dse () {
   fi
   if [[ ! -d ${cassandra_saved_caches_dir} ]]; then
     mkdir -p ${cassandra_saved_caches_dir}
-    chwon cassandra:cassandra $cassandra_saved_caches_dir
+    chown cassandra:cassandra $cassandra_saved_caches_dir
   fi
   execute "sed -i '/data_file_directories:.*/ {N; s|data_file_directories:.*/var/lib/cassandra/data|${storage_dirs_string}|g}' $cassandra_config"
   execute "sed -i 's|commitlog_directory: /var/lib/cassandra/commitlog|commitlog_directory: ${cassandra_commit_log_dir}|g' $cassandra_config"
