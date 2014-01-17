@@ -368,7 +368,7 @@ function configure_dse () {
   fi
   # confifure cassandra seed nodes
   if [[ -n $cassandra_seeds ]]; then
-    execute "sed -i s/          - seeds:.*/          - seeds: \"$cassandra_seeds\"/g $cassandra_config"
+    execute "sed -i 's/          - seeds:.*/          - seeds: \"$cassandra_seeds\"/g' $cassandra_config"
   fi
   # configure cassandra storage dirs
   local storage_dirs_string="data_file_directories: \n"
