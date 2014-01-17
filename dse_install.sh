@@ -394,7 +394,7 @@ function configure_dse () {
   execute "sed -i 's|saved_caches_directory: /var/lib/cassandra/saved_caches|saved_caches_directory: ${cassandra_saved_caches_dir}|g' $cassandra_config"
 
   execute "sed -i 's/# num_tokens: 256/num_tokens: 256/g' $cassandra_config"
-  execute "sed -i s/listen_address: localhost/listen_address: ${eth0_ip_address}/g $cassandra_config"
+  execute "sed -i 's/listen_address: localhost/listen_address: ${eth0_ip_address}/g' $cassandra_config"
   execute "sed -i 's/rpc_address: localhost/rpc_address: 0.0.0.0/g' $cassandra_config  "
   if [[ "$increase_defaults" = "true" ]]; then
     print_info "Bumping up the defaults and timeouts for finetuning cassandra"
@@ -418,8 +418,8 @@ function configure_dse_dc () {
 
   print_info "Configuring dse datacenter replication..."
   execute "sed -i 's/delegated_snitch:.*/delegated_snitch: org.apache.cassandra.locator.GossipingPropertyFileSnitch/g' $dse_config"
-  execute "sed -i s/dc=.*/dc=${datacenter_name}/g $dse_dc_config"
-  execute "sed -i s/rack=.*/rack=${rack_name}/g $dse_dc_config"
+  execute "sed -i 's/dc=.*/dc=${datacenter_name}/g' $dse_dc_config"
+  execute "sed -i 's/rack=.*/rack=${rack_name}/g' $dse_dc_config"
 }
 
 function configure_dse_broadcast_address () {
@@ -430,7 +430,7 @@ function configure_dse_broadcast_address () {
   if [[ -z $broadcast_address ]]; then
     broadcast_address=$(find_broadcast_address)
   fi
-  execute "sed -i s/# broadcast_address:.*/broadcast_address: ${broadcast_address}/g $cassandra_config"
+  execute "sed -i 's/# broadcast_address:.*/broadcast_address: ${broadcast_address}/g' $cassandra_config"
 }
 
 function configure_dse_heap () {
